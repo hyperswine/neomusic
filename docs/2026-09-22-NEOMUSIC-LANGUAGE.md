@@ -5,7 +5,7 @@ text authoring, MIDI, and the first LilyPond piano view (review steps 1–4).
 
 ## Run it
 
-From the HaskPlayground root:
+From the repository root:
 
 ```sh
 cabal run neo-music -- check examples/neomusic/twinkle.neomusic

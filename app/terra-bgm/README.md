@@ -19,7 +19,7 @@ release/reverb makes the exported track approximately 94.98 seconds.
 
 ## Rebuild
 
-From HaskPlayground, with Stack and FFmpeg installed:
+From the repository root, with cabal and FFmpeg installed:
 
 ```sh
 cabal run terra-bgm -- --check
