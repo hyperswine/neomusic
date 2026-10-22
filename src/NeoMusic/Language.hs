@@ -47,6 +47,7 @@ data Expr = Notes [Int] | NoteE NumE | Ref Name [Arg] | SeqE [Expr] | ParE Expr 
   | Gate NumE Expr | Pedal Expr | TempoE ShapeE Expr
   | PitchE NumE Expr | LevelE NumE Expr | PitchAcrossE NumE Expr | LevelAcrossE NumE Expr | GlideE NumE Expr
   | LagE NumE Expr | LagAcrossE NumE Expr
+  | StrengthE NumE Expr | StrengthAcrossE NumE Expr | DynamicsAcrossE NumE Expr
   deriving (Eq, Show)
 -- | Parameters, body, and whether it came from the prelude (whose bodies only
 -- see prelude definitions, so a document can't change what they mean).
@@ -111,6 +112,13 @@ decimal = lexeme $ do
 
 -- | A full signal expression: @a -> b@ over @+ -@ over @* /@ over atoms. A @-@
 -- only subtracts when followed by a space, so @-2@ is always a negative number.
+-- | A number in a header or attribute (tempo, master, gain, pan, send): the
+-- same exact expressions the music takes, without names (@1/2@, @-0.25@,
+-- @3e-1@).
+headerNumber :: Parser Double
+headerNumber = numExpr >>= \e ->
+  either fail (pure . fromRational) (numberValue (Env M.empty M.empty False M.empty []) e)
+
 numExpr :: Parser NumE
 numExpr = do
   a <- chainl1 numTerm addOp
@@ -162,6 +170,8 @@ expression kinds numberNames = parallel
       -- pitch/level s: per note; pitch/level across s: spanning the group.
       <|> (keyword "pitch" *> ((keyword "across" *> (PitchAcrossE <$> numExpr <*> term)) <|> (PitchE <$> numExpr <*> term)))
       <|> (keyword "level" *> ((keyword "across" *> (LevelAcrossE <$> numExpr <*> term)) <|> (LevelE <$> numExpr <*> term)))
+      <|> (keyword "strength" *> ((keyword "across" *> (StrengthAcrossE <$> numExpr <*> term)) <|> (StrengthE <$> numExpr <*> term)))
+      <|> (keyword "dynamics" *> keyword "across" *> (DynamicsAcrossE <$> numExpr <*> term))
       <|> (keyword "glide" *> (GlideE <$> numExpr <*> term))
     atom = (Notes . pure <$> integer)
       <|> (symbol "_" >> pure (Notes []))
@@ -209,8 +219,17 @@ presets = M.fromList
   ,("pluck",A.pluck),("supersaw",A.supersaw),("reeseBass",A.reeseBass),("subBass",A.subBass)
   ,("kick",A.kick),("snare",A.snare),("hat",A.hat),("noiseSweep",A.noiseSweep)]
 
+-- | Words the grammar claims before any binding: every prefix and signal
+-- keyword. A binding or parameter with one of these names could never be
+-- called, so it is rejected where it is defined.
 reserved :: [String]
-reserved = ["tempo","tuning","meter","key","instrument","sound","reverb","master","stretch","rev","inv","gate","pedal","speed","cycle","pitch","level","across","glide","sine","square","noise","start","lag"]
+reserved = ["tempo","tuning","meter","key","instrument","sound","reverb","master","stretch","rev","inv","gate","pedal","speed","cycle","pitch","level","strength","dynamics","across","glide","sine","square","noise","start","lag"]
+
+-- | Parameter names also can't be signal keywords that only claim a number
+-- position: a binding may be named @cents@ (the prelude's is), but a
+-- parameter named @cents@ would be read as the keyword inside a signal.
+reservedParams :: [String]
+reservedParams = reserved ++ ["cents"]
 
 -- | Source lines without comments or blank lines, numbered from 1. A line
 -- that starts with whitespace continues the statement above it.
@@ -462,7 +481,8 @@ parseDefinitions fromPrelude outer ls = do
   let bindings = [(i,s) | (i,s) <- ls, isBinding s]
       paramP = (NumberParam <$> (char '#' *> ident)) <|> (MusicParam <$> ident)
   signatures <- mapM (\(i,s) -> runLine i ((,) <$> ident <*> many paramP) (takeWhile (/='=') s)) bindings
-  unless (all (\(name, ps) -> let xs = name : map paramName ps in length xs == length (nub xs) && all (`notElem` reserved) xs) signatures)
+  unless (all (\(name, ps) -> let xs = name : map paramName ps in length xs == length (nub xs)
+                 && name `notElem` reserved && all ((`notElem` reservedParams) . paramName) ps) signatures)
     (Left "duplicate parameters or reserved binding name")
   let names = map fst signatures
   unless (length names == length (nub names)) (Left "duplicate binding")
@@ -492,8 +512,15 @@ parseDocumentWith assets input = do
       initial = (defaultPerformance, SheetView 4 "C" M.empty True, tuning defaultInstrument, [], [])
       env = Env defs fromPreludeDefs False M.empty []
   (perf,view,_,voices,_) <- foldM (readStatement kinds sounds) initial nonbindings
-  scores <- mapM (\(name,expr) -> evaluate env name expr) voices
-  let result = foldr (:||:) (Silence 0) scores
+  scores <- mapM (\(name,expr) -> evaluate env name expr) [(name,e) | (name,e) <- voices, name /= "conductor"]
+  conductors <- mapM (evaluate env "conductor" . snd) [(name,e) | (name,e) <- voices, name == "conductor"]
+  result <- case conductors of
+    [] -> do
+      unless (length scores <= 1 || all (null . tempoNodes) scores)
+        (Left "multi-part scores need an explicit conductor: track; move tempo out of the instrumental parts")
+      pure (foldr (:||:) (Silence 0) scores)
+    [conductor] -> arrange conductor scores
+    _ -> Left "duplicate conductor track"
   validate perf result
   pure (Document perf view result)
   where
@@ -504,7 +531,7 @@ parseDocumentWith assets input = do
       case first of
         "tempo" -> do
           singleton first
-          speed <- runLine line (keyword "tempo" *> number) s
+          speed <- runLine line (keyword "tempo" *> headerNumber) s
           pure (p {bpm=speed},v,t,vs,first:seen)
         "meter" -> do
           singleton first
@@ -531,14 +558,15 @@ parseDocumentWith assets input = do
           pure (p {mix = m},v,t,vs,first:seen)
         "master" -> do
           singleton first
-          m <- runLine line (masterParser (mix p)) s >>= id
+          m <- runLine line (masterParser line (mix p)) s >>= id
           either (Left . (("line " ++ show line ++ ": ") ++)) Right (A.validMix m)
           pure (p {mix = m},v,t,vs,first:seen)
         "instrument" -> do
           (name,preset,attrs) <- runLine line instrumentParser s
+          unless (name /= "conductor") (Left "conductor is reserved for the tempo track")
           unless (M.notMember name (instruments p)) (Left ("duplicate instrument: "++name))
           patch <- maybe (Left ("unknown sound: "++preset)) Right (M.lookup preset sounds)
-          (inst,staff) <- foldM applyAttr (defaultInstrument {tuning=t,timbre=patch},Treble) attrs
+          (inst,staff) <- foldM (applyAttr line) (defaultInstrument {tuning=t,timbre=patch},Treble) attrs
           unless (length (map fst attrs) == length (nub (map fst attrs))) (Left "duplicate instrument attribute")
           pure (p {instruments=M.insert name inst (instruments p)},v {staves=M.insert name staff (staves v)},t,vs,seen)
         _ -> do
@@ -560,7 +588,7 @@ parseDocumentWith assets input = do
       recorded <- optionMaybe (keyword "space" *> quoted)
       base <- if recorded /= Nothing then pure A.noReverb
               else option A.noReverb ((A.hall <$ keyword "hall") <|> (A.noReverb <$ keyword "none"))
-      fields <- many ((,) <$> ident <*> constant)
+      fields <- many ((,) <$> ident <*> headerNumber)
       pure $ do
         unless (length (map fst fields) == length (nub (map fst fields))) (Left "duplicate reverb setting")
         case recorded of
@@ -580,17 +608,17 @@ parseDocumentWith assets input = do
               _ -> Left ("a recorded room takes only wet and predelay, not " ++ field)) (A.Room impulse 0.3 0.02) fields
             Right (A.noReverb, Just room)
     -- master [drive x] [peak x] [tail x] [rate n] [normalize on|off]
-    masterParser m0 = do
+    masterParser line m0 = do
       keyword "master"
       fields <- many ((,) <$> ident <*> lexeme (many1 (noneOf " \t\r")))
       pure $ do
         unless (length (map fst fields) == length (nub (map fst fields))) (Left "duplicate master setting")
         foldM (\m (field, value) -> case field of
-          "drive" -> (\x -> m {A.mixDrive = x}) <$> runLine 0 number value
-          "peak" -> (\x -> m {A.mixPeak = x}) <$> runLine 0 number value
-          "tail" -> (\x -> m {A.mixTail = x}) <$> runLine 0 number value
-          "rate" -> (\x -> m {A.mixRate = x}) <$> runLine 0 integer value
-          "bits" -> (\x -> m {A.mixBits = x}) <$> runLine 0 integer value
+          "drive" -> (\x -> m {A.mixDrive = x}) <$> runLine line headerNumber value
+          "peak" -> (\x -> m {A.mixPeak = x}) <$> runLine line headerNumber value
+          "tail" -> (\x -> m {A.mixTail = x}) <$> runLine line headerNumber value
+          "rate" -> (\x -> m {A.mixRate = x}) <$> runLine line integer value
+          "bits" -> (\x -> m {A.mixBits = x}) <$> runLine line integer value
           "normalize" -> case value of
             "on" -> Right m {A.mixNormalize = True}
             "off" -> Right m {A.mixNormalize = False}
@@ -603,14 +631,18 @@ parseDocumentWith assets input = do
       preset <- ident
       attrs <- many ((,) <$> ident <*> lexeme (many1 (noneOf " \t\r")))
       pure (name,preset,attrs)
-    applyAttr (i,staff) (attr,value) = case attr of
+    applyAttr line (i,staff) (attr,value) = case attr of
       "staff" -> case value of
         "treble" -> Right (i,Treble)
         "bass" -> Right (i,Bass)
         _ -> Left "staff must be treble or bass"
-      "gain" -> do x <- runLine 0 number value; pure (i {gain=x},staff)
-      "pan" -> do x <- runLine 0 number value; pure (i {pan=x},staff)
-      "send" -> do x <- runLine 0 number value; pure (i {send=x},staff)
+      "pitch" -> case value of
+        "pitched" -> Right (i {pitchIdentity=Pitched},staff)
+        "unpitched" -> Right (i {pitchIdentity=Unpitched},staff)
+        _ -> Left "instrument pitch must be pitched or unpitched"
+      "gain" -> do x <- runLine line headerNumber value; pure (i {gain=x},staff)
+      "pan" -> do x <- runLine line headerNumber value; pure (i {pan=x},staff)
+      "send" -> do x <- runLine line headerNumber value; pure (i {send=x},staff)
       _ -> Left ("unknown instrument attribute: "++attr)
 
 -- | What evaluation can see: the document's and the prelude's definitions,
@@ -704,6 +736,9 @@ evaluate env name expr = case expr of
   PitchE p e -> do sig <- signalValue env p; mapPhrases (addPitch sig) <$> recur e
   LevelE l e -> do sig <- signalValue env l; mapPhrases (scaleLevel sig) <$> recur e
   PitchAcrossE p e -> do sig <- signalValue env p; recur e >>= pitchAcross sig
+  StrengthE l e -> do sig <- signalValue env l; _ <- constantNumber "strength" sig; mapPhrases (scaleStrength sig) <$> recur e
+  StrengthAcrossE l e -> do sig <- signalValue env l; recur e >>= strengthAcross sig
+  DynamicsAcrossE l e -> do sig <- signalValue env l; recur e >>= dynamicsAcross sig
   LevelAcrossE l e -> do sig <- signalValue env l; recur e >>= levelAcross sig
   LagE l e -> do k <- num l; mapPhrases (addLag k) <$> recur e
   LagAcrossE l e -> do sig <- signalValue env l; recur e >>= lagAcross sig
@@ -739,47 +774,25 @@ evaluate env name expr = case expr of
     argument (MusicArg e) = MusicV <$> recur e
     argument (NumberArg e) = SignalV <$> signalValue env e
 
-scaleScore :: Rational -> Score -> Score
-scaleScore k (Silence d) = Silence (k*d)
-scaleScore k (Line name xs) = Line name (stretch k xs)
-scaleScore k (a :>>: b) = scaleScore k a :>>: scaleScore k b
-scaleScore k (a :||: b) = scaleScore k a :||: scaleScore k b
-scaleScore k (Tempo shape s) = Tempo (scaled shape) (scaleScore k s)
-  where
-    scaled (Cycle segs) = Cycle [(k * l, scaled sub) | (l, sub) <- segs]
-    scaled other = other
-reverseScore :: Score -> Score
-reverseScore (Line name xs) = Line name (retro xs)
-reverseScore (Silence d) = Silence d
-reverseScore (a :>>: b) = reverseScore b :>>: reverseScore a
--- A ramp runs backwards; a cycle's segments run in reverse order, each mirrored,
--- so swing becomes short-long (exact when the extent is a whole number of
--- periods, since periods are counted from the node's start).
-reverseScore (Tempo shape s) = Tempo (mirrored shape) (reverseScore s)
-  where
-    mirrored (Ramp a b) = Ramp b a
-    mirrored (Cycle segs) = Cycle (reverse [(l, mirrored sub) | (l, sub) <- segs])
-reverseScore (a :||: b) =
-  let da = scoreLength a
-      db = scoreLength b
-      total = max da db
-  in (Silence (total-da) :>>: reverseScore a) :||: (Silence (total-db) :>>: reverseScore b)
-
 -- | Canonical expanded source. Instruments/headers are supplied by the caller;
 -- each structural leaf is a voice with an explicit initial delay. No bindings
 -- need to survive expansion. Parallel structure preserves exact beat onsets.
 prettyScore :: Score -> Either String String
 prettyScore s = do
   (total,events) <- flatten s
-  let carrier = case events of e:_ -> instrument e; [] -> "silent"
-  -- The clock is shared, so each tempo node can stand alone over rests.
-  let tempos = [ carrier ++ ": " ++ silence t0 ++ "speed " ++ shapeSource shape ++ " [_:" ++ rat len ++ "]"
-               | (t0,len,shape) <- tempoNodes s, len > 0 ]
+  -- Preserve the conductor's tree, including nested factors, as one owner.
+  let tempos = ["conductor: " ++ clockSource (conductorOf s) | not (null (tempoNodes s))]
   pure (unlines ([instrument e ++ ": " ++ silence (onset e) ++ token (event e)
                   ++ silence (total-onset e-dur (event e)) | e <- events] ++
                 (if null events then ["instrument silent = sine", "silent: "++if total == 0 then "[0]*0" else "_:"++rat total] else [])
                 ++ tempos))
   where
+    clockSource (Silence 0) = "[_]*0"
+    clockSource (Silence d) = "_:" ++ rat d
+    clockSource (a :>>: b) = "[" ++ clockSource a ++ " " ++ clockSource b ++ "]"
+    clockSource (a :||: b) = "[" ++ clockSource a ++ " & " ++ clockSource b ++ "]"
+    clockSource (Tempo shape body) = "speed " ++ shapeSource shape ++ " [" ++ clockSource body ++ "]"
+    clockSource (Line _ xs) = clockSource (Silence (sum (map dur xs)))
     rat = ratText
     -- Every compound is parenthesised, so it reads back as one atom.
     signalText sig = case sig of
@@ -793,7 +806,8 @@ prettyScore s = do
       Start a -> "(start "++signalText a++")"
     silence 0 = ""
     silence d = " _:"++rat d++" "
-    token e = "["++lagged e (leveled e (pitched e (gated e (pitch (pitches e)++":"++rat (dur e)))))++"]"
+    token e = "["++lagged e (struck e (leveled e (pitched e (gated e (pitch (pitches e)++":"++rat (dur e))))))++"]"
+    struck e body = if strength e == Const 1 || null (pitches e) then body else "strength "++signalText (strength e)++" ["++body++"]"
     lagged e body = if lag e == 0 then body else "lag "++signedRat (lag e)++" ["++body++"]"
     signedRat k = if k < 0 then "(-"++rat (negate k)++")" else rat k
     leveled e body = if level e == Const 1 then body else "level "++signalText (level e)++" ["++body++"]"

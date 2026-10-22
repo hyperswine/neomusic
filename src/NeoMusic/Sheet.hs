@@ -2,10 +2,10 @@
 module NeoMusic.Sheet (engrave, sheetEvents) where
 
 import Control.Monad (unless, when)
+import Numeric (showFFloat)
 import Data.List (intercalate, nub, sort, sortOn)
 import qualified Data.Map.Strict as M
 import Data.Ratio (denominator, numerator)
-import qualified NeoMusic.Audio as A
 import NeoMusic.Language (SheetView (..), Staff (..))
 import NeoMusic.Midi (midiPitch)
 import qualified NeoMusic.Pitch as A
@@ -25,8 +25,8 @@ sheetEvents perf view score = do
     convert e = do
       i <- maybe (Left "missing instrument") Right (M.lookup (instrument e) (instruments perf))
       staff <- maybe (Left ("missing staff for " ++ instrument e)) Right (M.lookup (instrument e) (staves view))
-      when (A.percussive (timbre i))
-        (Left "unpitched sounds (noise, or a pitch that sweeps into the note) cannot be engraved without a staff mapping")
+      when (pitchIdentity i == Unpitched)
+        (Left "unpitched instruments cannot be engraved without a staff mapping")
       -- Validate the tuning even for an all-rest instrument.
       _ <- midiPitch (tuning i) (A.Step 0)
       ps <- mapM (midiPitch (tuning i)) (pitches (event e))
@@ -83,7 +83,7 @@ engrave perf view score = do
     pitchedOnsets = nub (sort [t | (_, t, _, ps, _) <- events, not (null ps)])
     -- A constant slow-down covering exactly one onset, starting on it, is a fermata.
     isFermata (t0, len, shape) = maybe False (< 1) (speedOf shape) && [t | t <- pitchedOnsets, t0 <= t, t < t0 + len] == [t0]
-    fermatas = [t0 | node@(t0, _, _) <- nodes, isFermata node]
+    fermatas = [t0 | not (overlappingTempo score), node@(t0, _, _) <- nodes, isFermata node]
     -- Inside a tempo change that began earlier (one starting here doesn't count).
     active x = any (\(t0, len, _) -> t0 < x && x < t0 + len) nodes
     lastBeat = maximum (0 : [t + d | (_, t, d, _, _) <- events])
@@ -106,6 +106,13 @@ engrave perf view score = do
       | speedOf shape /= Nothing = Nothing
       | otherwise = Just "a tempo"
     marks
+      | overlappingTempo score =
+          [ (u, case exactSpeedAt score u of
+                  Just f -> tempoMark texts (Just f)
+                  -- Inside a ramp the factor is irrational: say so, rounded.
+                  Nothing -> tempoMark (texts ++ ["~" ++ showFFloat (Just 2) (bpm perf * a) "" ++ " BPM"]) Nothing)
+          | (u,_,a,b) <- tempoSpans score
+          , let texts = if b < a then ["rit."] else if b > a then ["accel."] else [] ]
       | null rawMarks = []
       | otherwise =
           [ (t, tempoMark texts factor)
@@ -147,7 +154,7 @@ engrave perf view score = do
           emit gap True ("", "") at (t - at) [] ++ emit gap True (articulation ev t (continues (t + d) xs) (continuing previous ev)) t d ps
             ++ go (t + d) (swellMotion ev, levelAt ev 1) xs
         -- Without noise: a humanized note's scatter isn't a written dynamic.
-        levelAt ev u = valueAt 0 1 u (withoutOsc (level ev))
+        levelAt ev u = valueAt 0 0 0 (withoutOsc (strength ev)) * valueAt 0 1 u (withoutOsc (level ev))
         continuing (before, end) ev = case (before, swellMotion ev) of
           (Rising, Rising) -> levelAt ev 0 >= end - 1e-9
           (Falling, Falling) -> levelAt ev 0 <= end + 1e-9

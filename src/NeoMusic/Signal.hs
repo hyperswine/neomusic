@@ -3,7 +3,8 @@
 -- A note has two: its pitch offset (in steps; signals add) and its level (a
 -- loudness multiplier; signals multiply). Time inside a signal is musical, never
 -- seconds: 'Points' run over the note's sounding time @u@ from 0 to 1, and
--- 'Osc' runs at a rate in cycles per beat. 'Cents' marks a part measured in
+-- 'Osc' runs at a rate in cycles per written beat. The render boundary maps
+-- this coordinate through the shared clock, even within a sounding note. 'Cents' marks a part measured in
 -- cents rather than steps; the tuning converts it at render. 'Noise' and
 -- 'Start' are for humanizing: a repeatable random signal, and a signal's value
 -- at the note's start, held. See docs/2026-10-13-NEOMUSIC-SIGNALS.md and docs/2026-10-14-NEOMUSIC-HUMANIZE.md.
@@ -63,18 +64,22 @@ negateSignal s = case s of
 constantValue :: Signal -> Maybe Rational
 constantValue s = case s of
   Const k -> Just k
+  Points [] -> Just 0
+  Points ((_, k):ps) | all ((== k) . snd) ps -> Just k
   a :+: b -> (+) <$> constantValue a <*> constantValue b
   a :*: b -> (*) <$> constantValue a <*> constantValue b
   Start a -> exactAt 0 0 a
   _ -> Nothing
 
 -- | The exact value at position @u@ of a note sounding @beats@ written beats,
--- where it has one: not for an oscillator, nor for a part in cents.
+-- where it has one: oscillators at phase zero are exact; parts in cents
+-- need a tuning and are left for the render boundary.
 exactAt :: Rational -> Rational -> Signal -> Maybe Rational
 exactAt beats u s = case s of
   Const k -> Just k
   Points ps -> Just (pointsValue ps u)
   Noise seed rate offset -> Just (noiseValue seed rate (offset + u * beats))
+  Osc w r | r * beats * u == 0 -> Just (case w of Sine -> 0; Square -> 1)
   a :+: b -> (+) <$> exactAt beats u a <*> exactAt beats u b
   a :*: b -> (*) <$> exactAt beats u a <*> exactAt beats u b
   Start a -> exactAt beats 0 a
@@ -147,7 +152,7 @@ signalBounds s = case s of
              in (minimum ps, maximum ps)
   Cents a -> signalBounds a
   Noise {} -> (-1, 1)
-  Start a -> signalBounds a
+  Start a -> maybe (signalBounds a) (\k -> (k, k)) (exactAt 0 0 a)
 
 -- | The value at position @u@ (0..1) of a note whose sound lasts @beats@
 -- written beats, with a cent worth @stepsPerCent@ steps.

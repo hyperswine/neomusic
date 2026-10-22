@@ -1,0 +1,14 @@
+-- Independent parts, one conductor, explicit strength and expression.
+tempo 100
+tuning 12 at C4
+instrument lead = pluck gain 0.35 pan -0.2 pitch pitched
+instrument bass = sine gain 0.18 pan 0.2 pitch pitched
+
+-- Nested speed is intentional here: 2 * 2 = 4 for the short arpeggio.
+conductor: _:4 rit 2/3 [_:4] speed 2 [speed 2 [_:2]] _:2
+
+-- Crescendo changes attack strength and expression together. The held note's
+-- pitch curve follows written beats through the ritardando.
+lead: cresc 0.3 0.8 [0 2 4 7] pitch across (0 -> 2) [7:4]
+      [0 4 7 12]:1/2 vel 0.6 [level 0.8 [(0 4 7):2]]
+bass: -12:4 -17:4 -12:2 -12:2

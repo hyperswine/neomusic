@@ -8,6 +8,7 @@ module NeoMusic.Numeric (NumericView (..), plain, numeric, numericPage, numericH
 
 import Data.List (intercalate, nub, sort, sortOn)
 import qualified Data.Map.Strict as M
+import Numeric (showFFloat)
 import Data.Ratio (denominator, numerator)
 import NeoMusic.Midi (midiPitch)
 import qualified NeoMusic.Pitch as A
@@ -30,7 +31,7 @@ visible view e
       -- Constant offsets are part of the pitch and stay; what varies is dropped.
       let (steps, cs, _) = pitchParts (pitchShift e)
       in e { gate = 1, pitchShift = plus (Const steps) (if cs == 0 then Const 0 else Cents (Const cs))
-           , level = Const (fst (levelParts (level e))) }
+           , level = Const 1 }
 
 -- | Separate simultaneous lines without merging independently timed events.
 -- Every lane starts at beat zero; gaps and trailing silence remain explicit.
@@ -75,6 +76,15 @@ layout view score = do
 -- earlier change is still going. A constant slow-down covering a single onset
 -- reads as "hold k", a fermata, and needs no end mark.
 tempoMarks :: Score -> Either String [(Rational, String)]
+tempoMarks score | overlappingTempo score = do
+  _ <- flatten score
+  let constantAt = exactSpeedAt score
+      approximate x = "~" ++ showFFloat (Just 6) x ""
+      label (u,_,a,b)
+        | Just r <- constantAt u = "speed " ++ rationalText r
+        | a == b = "speed " ++ approximate a
+        | otherwise = "speed " ++ approximate a ++ " -> " ++ approximate b
+  pure [(u,label span') | span'@(u,_,_,_) <- tempoSpans score]
 tempoMarks score = do
   (total, es) <- flatten score
   let nodes = [node | node@(_, len, _) <- tempoNodes score, len > 0]

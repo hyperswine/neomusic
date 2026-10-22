@@ -39,3 +39,5 @@ Pages written before 2026-10-21 came from HaskPlayground, where they moved into 
 | 2026-10-14 | [NEOMUSIC-SAMPLES](2026-10-14-NEOMUSIC-SAMPLES.md) | recorded sources (WAV, SFZ) and real rooms |
 | 2026-10-14 | [NEOMUSIC-SOUNDS](2026-10-14-NEOMUSIC-SOUNDS.md) | sounds and mix defined in `.neomusic` files |
 | 2026-10-14 | [NEOMUSIC-VOICE](2026-10-14-NEOMUSIC-VOICE.md) | voices as signal graphs: sources, shapers, mixing |
+| 2026-10-21 | [NEOMUSIC-COMPOSITION](2026-10-21-NEOMUSIC-COMPOSITION.md) | plan and implementation record: strength, clocks, conductor ownership and pitch identity |
+| 2026-10-21 | [NEOMUSIC-BUG-REVIEW](2026-10-21-NEOMUSIC-BUG-REVIEW.md) | follow-up fixes: held expression bounds, effective MIDI tempo and unit-ratio cents |

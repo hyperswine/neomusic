@@ -13,7 +13,7 @@ import System.IO.Temp (withSystemTempFile)
 import System.IO (hClose)
 import NeoMusic.Audio
   ( Contour(..), Mix(..), Mod(..), Osc(..), Patch(..), Note(..), Timeline(..), Voice(..), Wave(..)
-  , adsr, basicPatch, cutoffHz, defaultMix, expandClassic, hall, hat, kick, modAt, noReverb, noiseSweep
+  , adsr, basicPatch, cutoffHz, defaultMix, expandClassic, hall, hat, kick, modAt, noReverb, noiseSweep, note
   , pcmWav, pcmWavBits, percussive, pianoPatch, pluck, reeseBass, renderTimelineMix, sawPatch, sinePatch, snare
   , squarePatch, subBass, supersaw, validPatch, validVoice, Room(..) )
 import qualified Data.Map.Strict as Map
@@ -325,4 +325,37 @@ neoMusicGroup = Group "NeoMusic audio engine"
       annotateShow (VU.maximum (VU.map abs (VU.zipWith (-) shifted echo)))
       assert (VU.maximum (VU.map abs (VU.zipWith (-) shifted echo)) < 1e-9)
       assert (isLeft (renderTimelineMix (mixWith (Just (Room four 1 0))) (Timeline 0.5 [sent]))))
+  , ("engine edges: loops, releases after then, note-on pitch, ringing and declicking", withTests 1 $ property $ do
+      let rate = 44100 :: Int
+          fr = fromIntegral rate :: Double
+          mix0 = (defaultMix rate) {mixNormalize = False}
+          energy v a b = VU.sum (VU.map (^ (2 :: Int)) (VU.slice a (b - a) v))
+          frames = 4410                                   -- a 0.1 s recording of C4
+          c4 = VU.generate frames (\i -> realToFrac (sin (2 * pi * 261.63 * fromIntegral i / fr)) :: Float)
+          recording = Recording "memory.wav" fr frames Nothing [c4]
+          setAt key lp = SampleSet "memory.sfz" [Region recording 60 (key, key) (1, 127) 1 (1, 1) lp False]
+          sampled key lp = Gain (adsr 0.001 0 1 0.05) (Sampled (setAt key lp))
+          half = round (0.5 * fr) :: Int
+      -- A loop may end on the recording's last frame and keeps playing.
+      (looped, _) <- evalEither (renderTimelineMix mix0 (Timeline 1 [note 0 261.63 0.5 (sampled 60 (Just (0, frames - 1))) 1 1 0 0]))
+      let first = energy looped 0 frames
+      assert (energy looped (3 * frames) half > 0.5 * first)
+      -- A release inside then's second part starts at note-off, not d later.
+      let thenRelease = Then 1 (K 1) (Release 0.5 (K 1))
+      assert (abs (modAt thenRelease 2 1 0 2.25 - 0.25) < 1e-12)
+      modAt thenRelease 2 1 0 2.6 === 0
+      -- Recordings are checked at the pitch a note starts on, as they're played:
+      -- a C4 note starting an octave up needs the region at C5, not C4.
+      let glideDown voice = (note 0 261.63 0.5 voice 1 1 0 0) {pitchMod = Breaks [(0, 1), (1, 0)]}
+      (fromAbove, _) <- evalEither (renderTimelineMix mix0 (Timeline 1 [glideDown (sampled 72 Nothing)]))
+      assert (energy fromAbove 0 half > 0)
+      assert (isLeft (renderTimelineMix mix0 (Timeline 1 [glideDown (sampled 60 Nothing)])))
+      -- A plucked string with no envelope rings out past note-off...
+      (plucked, _) <- evalEither (renderTimelineMix mix0 (Timeline 1 [note 0 220 0.5 (Gain Velocity (Plucked 2.5 0.6)) 1 1 0 0]))
+      assert (energy plucked (half + 2205) (half + 8820) > 0)
+      -- ...and a tone with no release fades over 2 ms instead of clicking off.
+      (cut, _) <- evalEither (renderTimelineMix mix0 (Timeline 1 [note 0 220 0.5 (Tone SineWave) 1 1 0 0]))
+      let peak = VU.maximum (VU.map abs (VU.take half cut))
+          lastWindow = VU.slice (half + 66) 22 cut              -- the final half millisecond
+      assert (VU.maximum (VU.map abs lastWindow) < 0.3 * peak))
   ]

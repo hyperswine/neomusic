@@ -2,11 +2,11 @@
 -- the primitives. Read before every score; a score's own definition of any of
 -- these names replaces this one. #k marks a number parameter.
 
--- Loudness: level multiplies, so these nest by multiplying.
-vel #v x      = level v [x]            -- strength, 0..1
+-- Attack strength and expression are separate, multiplicative controls.
+vel #v x      = strength v [x]            -- strength, 0..1
 swell #s x    = level s [x]            -- a loudness shape, e.g. swell 1/4 -> 1
-cresc #a #b x = level across a -> b [x]   -- louder across the whole group (velocity too)
-dim #a #b x   = level across a -> b [x]   -- softer across the whole group
+cresc #a #b x = dynamics across a -> b [x]   -- louder across the whole group (velocity too)
+dim #a #b x   = dynamics across a -> b [x]   -- softer across the whole group
 
 -- Pitch shapes: pitch adds, in steps.
 bend #s x     = pitch s [x]            -- e.g. bend 0 -> 1, bend {0:0 1/4:1 1:0}
@@ -30,7 +30,7 @@ octave x      = up 12 [x]              -- up an octave in 12-EDO
 -- random signal (rate knots a beat, joined by lines, within -1..1); start holds
 -- a signal's value through each note. Neighbouring notes get related values,
 -- as a player's do. The seed picks the pattern: give each part its own.
-vary #seed #a x  = level across (1 - a * (1 - start (noise seed 3)) / 2) [x]   -- each note up to a softer
+vary #seed #a x  = strength across (1 - a * (1 - start (noise seed 3)) / 2) [x]   -- each note up to a softer
 loose #seed #b x = lag across (b * (1 + noise (seed + 7919) 3) / 2) [x]       -- each note up to b beats late
 drift #seed #c x = pitch across (cents (c * noise (seed + 15838) 1/2)) [x]    -- intonation wandering within c cents
 humanize #seed x = loose seed 1/48 [vary seed 0.15 [x]]                       -- both, gently

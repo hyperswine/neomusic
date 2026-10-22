@@ -5,10 +5,9 @@ import Control.Monad (unless, when)
 import Data.Bits ((.|.))
 import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Builder
-import Data.List (nub, sortOn)
+import Data.List (nub, nubBy, sortOn)
 import qualified Data.Map.Strict as M
 import Data.Ratio (denominator, numerator)
-import qualified NeoMusic.Audio as A
 import qualified NeoMusic.Pitch as A
 import NeoMusic.Score hiding (n)
 
@@ -30,18 +29,21 @@ midi perf score = do
   let names = nub [instrument e | e <- es]
       -- A note sounds until onset + dur * gate, which may pass the score's end.
       release e = onset e + dur (event e) * gate (event e)
-  changes <- tempoChanges perf score
   -- The written rhythm sets the resolution; curves are sampled every 1/64
   -- beat, so they need that too. A lag (a performance nuance) is rounded to
-  -- the nearest tick rather than refining the grid.
+  -- the nearest tick rather than refining the grid, and the tempo track then
+  -- follows the notes where they actually sound.
+  unlagged <- tempoChangesWith (const 0) perf score
   let sounding e = not (null (pitches (event e))) && vel (event e) > 0
       anyCurved = any (\e -> sounding e && curvedEvent (event e)) es
       division = foldl lcm (if anyCurved then 64 else 1)
-        (map denominator (total : map fst changes ++ concat [[onset e,release e] | e <- es]))
+        (map denominator (total : map fst unlagged ++ concat [[onset e,release e] | e <- es]))
       ticks x = numerator (x * fromInteger division)
       lagOf e = fromInteger (round (lag (event e) * fromInteger division)) / fromInteger division
       end = maximum (total : [release e + lagOf e | e <- es])
   unless (division <= 32767) (Left "exact rhythm needs MIDI resolution above 32767 ticks/quarter")
+  -- Rounded lags are on the grid, so the lagged breaks need no finer one.
+  changes <- tempoChangesWith lagOf perf score
   lanes <- concat <$> mapM (instrumentLanes lagOf es) names
   unless (length lanes <= 15) (Left "MIDI needs more than 15 pitched channels for instruments, overlapping unisons and curved notes")
   tracks <- mapM (makeTrack ticks end) (zip lanes ([0..8]++[10..15]))
@@ -52,41 +54,42 @@ midi perf score = do
   where
     instrumentLanes lagOf es name = do
       i <- maybe (Left "missing instrument") Right (M.lookup name (instruments perf))
-      when (A.percussive (timbre i))
-        (Left "unpitched sounds (noise, or a pitch that sweeps into the note) need an explicit MIDI percussion mapping")
+      when (pitchIdentity i == Unpitched)
+        (Left "unpitched instruments need an explicit MIDI percussion mapping")
       notes <- concat <$> mapM (convert lagOf i) [e | e <- es, instrument e == name]
       -- A separate channel prevents one unison's note-off cutting another
       -- short, and pitch bend and expression act on a whole channel, so a
-      -- curved note shares its channel with nothing that overlaps it.
+      -- curved note shares its channel only with notes that overlap it under
+      -- exactly the same curves (a chord's tones).
       pure (foldl place [] (sortOn noteOn notes))
     place [] n0 = [[n0]]
     place (lane:lanes) n0
-      | all (\n1 -> (noteKey n0 /= noteKey n1 && not (curved n0 || curved n1)) || noteOff n0 <= noteOn n1 || noteOff n1 <= noteOn n0) lane = (n0:lane):lanes
+      | all (fits n0) lane = (n0:lane):lanes
       | otherwise = lane:place lanes n0
-    clock = timeMap score
+    fits n0 n1 = noteOff n0 <= noteOn n1 || noteOff n1 <= noteOn n0
+      || (noteKey n0 /= noteKey n1 && (not (curved n0 || curved n1) || sameCurves n0 n1))
     makeTrack ticks total (notes,channel) = do
       let bendRange = maximum (0 : [ceiling (maximum (0 : map abs (bendSamples n))) | n <- notes, curved n]) :: Integer
       unless (bendRange <= 127) (Left "a bend exceeds the MIDI pitch-bend range of 127 semitones")
       let range = max 1 bendRange
           -- At one tick: note-offs, then resets, then curve samples, then note-ons.
           events = sortOn (\(t,priority,_) -> (t,priority)) $ concat
-            [ [(ticks (noteOn n),3::Int,[0x90+channel,noteKey n,noteVel n]), (ticks (noteOff n),0,[0x80+channel,noteKey n,0])]
-              ++ (if curved n then curveEvents ticks channel range n else [])
-            | n <- notes ]
+            ([ [(ticks (noteOn n),3::Int,[0x90+channel,noteKey n,noteVel n]), (ticks (noteOff n),0,[0x80+channel,noteKey n,0])]
+             | n <- notes ]
+             -- Notes sharing a channel share their curves: emit each once.
+             ++ [curveEvents ticks channel range n | n <- nubBy sameCurves (filter curved notes)])
           -- RPN 0 sets the bend range in semitones, then the null RPN.
           rpn = [(0,[0xb0+channel,101,0]),(0,[0xb0+channel,100,0]),(0,[0xb0+channel,6,fromInteger range]),(0,[0xb0+channel,38,0]),(0,[0xb0+channel,101,127]),(0,[0xb0+channel,100,127])]
       track (ticks total) ((0,[0xc0+channel,0]) : (if any curved notes then rpn else []) ++ [(t,bytes) | (t,_,bytes) <- events])
     -- Sample times: every 1/64 beat from the onset, up to the note-off.
     sampleBeats n = takeWhile (< noteOff n) [noteOn n, noteOn n + 1/64 ..]
-    -- Position within the sounding time, through the clock, as the audio measures it.
-    position n b =
-      let p0 = performed clock (noteOn n)
-          span' = performed clock (noteOff n) - p0
-      in if span' > 0 then (performed clock b - p0) / span' else 0
+    -- Signals follow written beats; the tempo track maps these samples to
+    -- physical time, just as audio's inverse clock does within each note.
+    position n b = fromRational ((b - noteOn n) / (noteOff n - noteOn n))
     soundingBeats n = fromRational (noteOff n - noteOn n)
     -- The whole pitch signal in semitones (12-EDO: a step is a semitone, a cent 1/100).
     bendSamples n = [valueAt (1 / 100) (soundingBeats n) (position n b) (pitchShift (noteEvent n)) | b <- sampleBeats n] :: [Double]
-    -- The level's varying part; its constant part is the note's velocity.
+    -- Expression is independent of attack velocity.
     swellSamples n = [valueAt 0 (soundingBeats n) (position n b) (varyingLevel n) | b <- sampleBeats n] :: [Double]
     curveEvents ticks channel range n =
       let bendValue x = max 0 (min 16383 (8192 + round (8191 * x / fromInteger range))) :: Int
@@ -114,10 +117,16 @@ curved :: MidiNote -> Bool
 curved = curvedEvent . noteEvent
 
 curvedEvent :: Event -> Bool
-curvedEvent e = pitchShift e /= Const 0 || snd (levelParts (level e)) /= Const 1
+curvedEvent e = pitchShift e /= Const 0 || constantValue (level e) /= Just 1
+
+-- | Both notes sound over the same span under the same pitch and expression
+-- signals, so one channel's bend and expression serve both.
+sameCurves :: MidiNote -> MidiNote -> Bool
+sameCurves a b = noteOn a == noteOn b && noteOff a == noteOff b
+  && pitchShift (noteEvent a) == pitchShift (noteEvent b) && level (noteEvent a) == level (noteEvent b)
 
 varyingLevel :: MidiNote -> Signal
-varyingLevel = snd . levelParts . level . noteEvent
+varyingLevel = level . noteEvent
 
 -- | The conductor track as (written beat, microseconds per quarter) changes.
 --
@@ -128,11 +137,16 @@ varyingLevel = snd . levelParts . level . noteEvent
 -- clock says. Integer microseconds are the only rounding, and its error is
 -- carried into the next step, so note times stay within about a microsecond.
 tempoChanges :: Performance -> Score -> Either String [(Rational, Integer)]
-tempoChanges perf score = do
+tempoChanges = tempoChangesWith (lag . event)
+
+-- | The tempo map stepped at each note where it sounds: its onset and release
+-- moved by the given lag.
+tempoChangesWith :: (BeatEvent -> Rational) -> Performance -> Score -> Either String [(Rational, Integer)]
+tempoChangesWith lagOf perf score = do
   validate perf score
   (total, es) <- flatten score
   let clock = timeMap score
-      notes = concat [[onset e, onset e + dur (event e) * gate (event e)] | e <- es]
+      notes = concat [[onset e + lagOf e, onset e + lagOf e + dur (event e) * gate (event e)] | e <- es]
       end = maximum (total : notes)
       inside u v x = u < x && x < v
       ramps = [(u, v) | (u, v, k) <- timePieces clock, k /= 0]
@@ -149,14 +163,15 @@ tempoChanges perf score = do
         unless (tempo >= 1 && tempo <= 16777215) (Left "tempo outside MIDI representable range")
         ((x0, tempo) :) <$> go (emitted + fromInteger tempo * width) more
   stepped <- if null steps then pure [] else go 0 steps
-  base <- let b = round (60000000 / bpm perf) :: Integer
-          in if b >= 1 && b <= 16777215 && not (isInfinite (60000000 / bpm perf))
-               then Right b else Left "tempo outside MIDI representable range"
-  -- Drop changes that repeat the tempo already in force.
-  let kept = case stepped of
-        [] -> [(0, base)]
-        first : later -> first : [c | (c, (_, prev)) <- zip later stepped, snd c /= prev]
-  pure kept
+  -- A nonempty score already has its effective tempo at beat zero. The
+  -- unmodified base tempo need only be representable when it is actually used.
+  case stepped of
+    [] -> let microsPerBeat = 60000000 / bpm perf
+              b = round microsPerBeat :: Integer
+          in if not (isInfinite microsPerBeat) && b >= 1 && b <= 16777215
+               then Right [(0, b)] else Left "tempo outside MIDI representable range"
+    -- Drop changes that repeat the tempo already in force.
+    first : later -> pure (first : [c | (c, (_, prev)) <- zip later stepped, snd c /= prev])
 
 bytes3 :: Integer -> [Int]
 bytes3 x = [fromInteger (x `div` 65536),fromInteger (x `div` 256 `mod` 256),fromInteger (x `mod` 256)]

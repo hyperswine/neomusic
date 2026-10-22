@@ -12,7 +12,7 @@ module NeoMusic.Audio
   , basicPatch, sinePatch, sawPatch, squarePatch, pianoPatch
   , pluck, supersaw, reeseBass, subBass, kick, snare, hat, noiseSweep
     -- * Physical timeline
-  , Note(..), Timeline(..), Contour(..), note, contourAt, contourBounds
+  , Note(..), Timeline(..), Contour(..), ClockSegment(..), note, contourAt, contourBounds
     -- * Mixing and export
   , Reverb(..), Mix(..), noReverb, hall, defaultMix, validMix
   , renderTimelineMix, writeTimelineMix, pcmWav, pcmWavBits, exportAs
@@ -20,6 +20,7 @@ module NeoMusic.Audio
 
 import Control.Monad (forM, forM_, unless, when)
 import Data.List (sortOn)
+import GHC.Float (expm1, log1p)
 import Control.Monad.ST (ST, runST)
 import Data.STRef (STRef, newSTRef, readSTRef, writeSTRef)
 import Data.Bits (shiftL, shiftR, xor)
@@ -111,7 +112,7 @@ data Prepared
   | PLinear !Double !Double !Double
   | PApproach !Double !Double !Double
   | PThen !Double !Prepared !Prepared
-  | PRelease !Double !Bool !Double !Prepared   -- time, level known?, level at note-off, body
+  | PRelease !Double !Double !Bool !Double !Prepared   -- note-off (local clock), time, level known?, level at note-off, body
   | PLfo !Wave !Double
   | PKey
   | PAdd !Prepared !Prepared
@@ -122,30 +123,32 @@ prepare gate vel m = case m of
   K x -> PK x
   Linear a b d -> PLinear a b d
   Approach a b d -> PApproach a b d
-  Then d x y -> PThen d (prepare gate vel x) (prepare gate vel y)
+  -- The second part's clock restarts at d, so its note-off is d earlier.
+  Then d x y -> PThen d (prepare gate vel x) (prepare (gate - d) vel y)
   Release r x ->
     let px = prepare gate vel x
         known = not (usesKey x)
-    in PRelease r known (if known then evalPrepared gate px gate 0 else 0) px
+    in PRelease gate r known (if known then evalPrepared px gate 0 else 0) px
   Lfo w f -> PLfo w f
   Velocity -> PK vel
   Key -> PKey
   a :+ b -> PAdd (prepare gate vel a) (prepare gate vel b)
   a :* b -> PMul (prepare gate vel a) (prepare gate vel b)
 
--- | The value at @t@ seconds since note-on, for a note released at @gate@,
--- with the current key @k@.
-evalPrepared :: Double -> Prepared -> Double -> Double -> Double
-evalPrepared !gate = go
+-- | The value at @t@ seconds since note-on, with the current key @k@. The
+-- note-off time lives in each release ('prepare' put it there).
+evalPrepared :: Prepared -> Double -> Double -> Double
+evalPrepared = go
   where
     go p !t !k = case p of
       PK x -> x
       PLinear a b d -> if t >= d then b else a + (b - a) * (t / d)
       PApproach a b d -> if d <= 0 then b else b + (a - b) * exp (negate (4.6 * t / d))
       PThen d x y -> if t < d then go x t k else go y (t - d) k
-      PRelease r known held x
-        | t < gate -> go x t k
-        | t < gate + r -> let u = (t - gate) / r in (if known then held else go x gate k) * (1 - u) * (1 - u)
+      -- A release carries its own note-off: 'Then' shifts it for its second part.
+      PRelease off r known held x
+        | t < off -> go x t k
+        | t < off + r -> let u = (t - off) / r in (if known then held else go x off k) * (1 - u) * (1 - u)
         | otherwise -> 0
       PLfo w f -> waveAt w (f * t)
       PKey -> k
@@ -155,7 +158,7 @@ evalPrepared !gate = go
 -- | A modulation compiled for one note (its note-off time and velocity) into a
 -- function of seconds since note-on and the current key.
 compileMod :: Double -> Double -> Mod -> Double -> Double -> Double
-compileMod gate vel m = evalPrepared gate (prepare gate vel m)
+compileMod gate vel m = evalPrepared (prepare gate vel m)
 
 -- | A modulation's value at @t@ seconds for a note released at @gate@.
 modAt :: Mod -> Double -> Double -> Double -> Double -> Double
@@ -229,9 +232,43 @@ data Contour
   | Cycles Wave Double          -- ^ a unit sine or square, this many cycles over the note
   | Contour :+. Contour
   | Contour :*. Contour
+  | Warp [ClockSegment] Contour -- ^ elapsed position to musical position
   deriving (Eq, Show)
 infixl 6 :+.
 infixl 7 :*.
+
+-- | An invertible clock segment in normalized coordinates. Its speed is
+-- log-linear, with total log change 'clockCurve' from its start to its end.
+-- This is a physical interpolation description, not a score or beat unit.
+data ClockSegment = ClockSegment
+  { timeFrom :: Double, timeTo :: Double
+  , positionFrom :: Double, positionTo :: Double, clockCurve :: Double }
+  deriving (Eq, Show)
+
+clockPosition :: [ClockSegment] -> Double -> Double
+clockPosition [] u = u
+clockPosition (seg:more) u
+  | u > timeTo seg && not (null more) = clockPosition more u
+  | otherwise =
+      let fraction = max 0 (min 1 ((u - timeFrom seg) / (timeTo seg - timeFrom seg)))
+          k = clockCurve seg
+          position | fraction == 0 = 0
+                   | fraction == 1 = 1
+                   | k == 0 = fraction
+                   | otherwise = negate (log1p (fraction * expm1 (negate k))) / k
+      in positionFrom seg + (positionTo seg - positionFrom seg) * position
+
+validClock :: [ClockSegment] -> Bool
+validClock [] = False
+validClock segments@(first:_) =
+  timeFrom first == 0 && positionFrom first == 0
+  && all valid segments && all joined (zip segments (drop 1 segments))
+  && timeTo (last segments) == 1 && positionTo (last segments) == 1
+  where
+    valid s = all unitRange [timeFrom s,timeTo s,positionFrom s,positionTo s]
+      && timeTo s > timeFrom s && positionTo s > positionFrom s
+      && finite (clockCurve s) && finite (expm1 (negate (clockCurve s)))
+    joined (a,b) = timeTo a == timeFrom b && positionTo a == positionFrom b
 
 -- | 'pitchMod' is added to the pitch in octaves; 'loudness' multiplies the
 -- amplitude. @Flat 0@ and @Flat 1@ mean "none", and take the plain path.
@@ -248,6 +285,7 @@ note t f d p v g pn s = Note t f d p v g pn s (Flat 0) (Flat 1)
 contourAt :: Contour -> Double -> Double
 contourAt c u = case c of
   Flat x -> x
+  Warp clock curve -> contourAt curve (clockPosition clock u)
   Breaks ps -> breaksAt ps
   Cycles w n ->
     let phase = n * u
@@ -270,6 +308,7 @@ contourAt c u = case c of
 contourBounds :: Contour -> (Double, Double)
 contourBounds c = case c of
   Flat x -> (x, x)
+  Warp _ curve -> contourBounds curve
   Breaks [] -> (0, 0)
   Breaks ps -> (minimum (map snd ps), maximum (map snd ps))
   Cycles _ _ -> (-1, 1)
@@ -281,6 +320,7 @@ contourBounds c = case c of
 validContour :: Contour -> Bool
 validContour c = case c of
   Flat x -> finite x
+  Warp clock curve -> validClock clock && validContour curve
   Breaks ps -> all (\(u, y) -> unitRange u && finite y) ps
   Cycles _ n -> finite n
   a :+. b -> validContour a && validContour b
@@ -381,7 +421,9 @@ validVoice voice = case voice of
         (Left (recordingPath recording ++ ": a recording must be mono or stereo"))
   where modOk m = unless (validMod m) (Left "voice modulations need finite values and positive times")
 
--- | Unpitched: every part is. Noise is unpitched, and so is everything under a
+-- | Legacy sound-shape heuristic, not pitch identity. Exporters use the
+-- instrument's explicit declaration instead. This deliberately broad heuristic
+-- considers noise unpitched, and so is everything under a
 -- 'Bend' that starts away from 0 (a drop or sweep into the note); a vibrato
 -- starts at 0, so it isn't.
 percussive :: Voice -> Bool
@@ -400,22 +442,54 @@ percussive voice = case voice of
   Classic p -> percussive (expandClassic p)
   Sampled _ -> False
 
--- | How long a voice sounds after note-off: its longest amplitude release
--- (at least 2 ms, so a note never stops on a click).
+-- | How long a voice sounds after note-off. A gain that falls silent (its
+-- envelope released) ends everything under it; otherwise the longest release
+-- counts, and a plucked string rings out its own decay. A voice with nothing
+-- to end it (a tone, noise or recording with no release above it) stops at
+-- note-off, faded over 'declickTime' rather than cut on a click.
 voiceTail :: Voice -> Double
-voiceTail = max 0.002 . go
-  where
-    go voice = case voice of
-      Gain m v -> max (releaseOf m) (go v)
-      Bend _ v -> go v
-      Lowpass _ _ v -> go v
-      Highpass _ v -> go v
-      Bandpass _ _ v -> go v
-      Unison _ _ _ v -> go v
-      Pan _ v -> go v
-      a :& b -> max (go a) (go b)
-      Classic p -> releaseOf (amp p)
-      _ -> 0
+voiceTail = max declickTime . ringing
+
+-- | The fade given to a voice that has no release of its own.
+declickTime :: Double
+declickTime = 0.002
+
+-- | How long a voice rings after note-off by itself; 0 means it has no release
+-- and is faded out at note-off.
+ringing :: Voice -> Double
+ringing voice = case voice of
+  Gain m v -> maybe (max (releaseOf m) (ringing v)) id (silentAfter m)
+  Bend _ v -> ringing v
+  Lowpass _ _ v -> ringing v
+  Highpass _ v -> ringing v
+  Bandpass _ _ v -> ringing v
+  Unison _ _ _ v -> ringing v
+  Pan _ v -> ringing v
+  a :& b -> max (ringing a) (ringing b)
+  Classic p -> releaseOf (amp p)
+  Plucked decayTime _ -> decayTime
+  _ -> 0
+
+-- | Seconds after note-off by which a modulation is certainly zero: a release
+-- ends at its length, and a product is zero once either factor is. 'Nothing'
+-- when it may keep sounding (or depends on when the note ends, as in 'Then').
+silentAfter :: Mod -> Maybe Double
+silentAfter m = case m of
+  Release r _ -> Just r
+  K 0 -> Just 0
+  a :* b -> case (silentAfter a, silentAfter b) of
+    (Just x, Just y) -> Just (min x y)
+    (x, Nothing) -> x
+    (Nothing, y) -> y
+  a :+ b -> max <$> silentAfter a <*> silentAfter b
+  _ -> Nothing
+
+-- | 1 while a note sounds, then (only for a voice with no release) a linear
+-- fade to 0 over 'declickTime' after note-off.
+declick :: Bool -> Double -> Double -> Double
+declick needed gate t
+  | needed && t > gate = max 0 ((gate + declickTime - t) / declickTime)
+  | otherwise = 1
 
 -- Patches ---------------------------------------------------------------------
 
@@ -574,7 +648,7 @@ renderTimelineMix mix (Timeline total ns) = do
   unless (finite (end * fr) && end * fr < fromIntegral (maxBound :: Int))
     (Left "rendered sample count exceeds platform range")
   let takes = takeNumbers ns
-  forM_ (zip takes ns) $ \(k, v) -> forM_ (reaching (duration v) (velocity v) (hz v) (sound v)) $ \(set, f) ->
+  forM_ (zip takes ns) $ \(k, v) -> forM_ (reaching (duration v) (velocity v) (noteOnFrequency v) (sound v)) $ \(set, f) ->
     when (null (chooseRegions set k (velocity v) f)) (Left (setPath set ++ ": nothing recorded for key "
       ++ show (round (69 + 12 * logBase 2 (f / 440)) :: Int) ++ " at velocity " ++ show (max 1 (round (velocity v * 127)) :: Int)))
   let len = ceiling (end * fr) :: Int
@@ -624,6 +698,14 @@ takeNumbers ns = map snd (sortOn fst (snd (foldl count (M.empty, []) (sortOn (st
           k = M.findWithDefault 0 key seen
       in (M.insert key (k + 1) seen, (i, k) : acc)
 
+-- | The frequency a note sounds at the instant it starts: its pitch curve's
+-- value at 0, not just its base pitch. Rendering chooses recordings at this
+-- frequency, so validation must check the same one.
+noteOnFrequency :: Note -> Double
+noteOnFrequency v
+  | pitchMod v == Flat 0 = hz v
+  | otherwise = hz v * 2 ** contourAt (pitchMod v) 0
+
 -- | Every recorded instrument in a voice, with the frequency reaching it at
 -- note-on (through the bends and unison copies above it).
 reaching :: Double -> Double -> Double -> Voice -> [(SampleSet, Double)]
@@ -632,7 +714,7 @@ reaching gate vel = go
     go f voice = case voice of
       Sampled set -> [(set, f)]
       Gain _ v -> go f v
-      Bend m v -> go (f * 2 ** (evalPrepared gate (prepare gate vel m) 0 (keyOf f) / 12)) v
+      Bend m v -> go (f * 2 ** (evalPrepared (prepare gate vel m) 0 (keyOf f) / 12)) v
       Lowpass _ _ v -> go f v
       Highpass _ v -> go f v
       Bandpass _ _ v -> go f v
@@ -658,6 +740,7 @@ renderSynth fr seed v p left right sends = do
       nv = VU.length table
   phases <- VU.thaw (VU.fromList (map snd voices))
   let (i0, i1) = sampleRange fr (MV.length left) (start v) (start v + duration v + voiceTail (Classic p))
+      fade = declick (releaseOf (amp p) == 0) (duration v)
       (gl, gr) = panGains (pan v)
       -- The patch's modulations, compiled for this note's note-off and velocity.
       ampAt = compileMod (duration v) (velocity v) (amp p)
@@ -703,9 +786,8 @@ renderSynth fr seed v p left right sends = do
                 (lowR, r1', r2') = if lowpassOn then lowpass lpG kq oscR r1 r2 else (oscR, r1, r2)
                 (outL, h1', h2') = if highpass p > 0 then highpassed hpG lowL h1 h2 else (lowL, h1, h2)
                 (outR, h3', h4') = if highpass p > 0 then highpassed hpG lowR h3 h4 else (lowR, h3, h4)
-                e
-                  | loudness v == Flat 1 = gain v * ampAt t key
-                  | otherwise = gain v * contourAt (loudness v) u * ampAt t key
+                e = fade t * if loudness v == Flat 1 then gain v * ampAt t key
+                                 else gain v * contourAt (loudness v) u * ampAt t key
                 yl = e * gl * outL
                 yr = e * gr * outR
             addTo left i yl
@@ -871,7 +953,7 @@ compileVoice fr gate vel seed takeNumber rng seeds = build
         Nothing -> NGain p (usesKey m) <$> build phase f0 v
       Bend m v -> let p = prep m in case constantOf p of
         Just x -> let r = 2 ** (x / 12) in NRaise r <$> build phase (f0 * r) v
-        Nothing -> NBend p (usesKey m) <$> build phase (f0 * 2 ** (evalPrepared gate p 0 (keyOf f0) / 12)) v
+        Nothing -> NBend p (usesKey m) <$> build phase (f0 * 2 ** (evalPrepared p 0 (keyOf f0) / 12)) v
       Lowpass m r v -> case constantOf (prep m) of
         Just c | 261.63 * 2 ** c >= 0.45 * fr -> build phase f0 v   -- at or above 0.45 x the rate: passes everything
         _ -> filterNode 0 m (max 0.05 (sqrt 2 * (1 - r))) phase f0 v
@@ -914,7 +996,7 @@ cutoffGain fr octaves = tan (pi * min (0.45 * fr) (261.63 * 2 ** octaves) / fr)
 stepVoice :: Double -> Double -> Node s -> Double -> Double -> ST s (Double, Double)
 stepVoice fr gate = go
   where
-    modNow p keyed t f = evalPrepared gate p t (if keyed then keyOf f else 0)
+    modNow p keyed t f = evalPrepared p t (if keyed then keyOf f else 0)
     go node !t !f = case node of
       NTone code phase -> do
         ph <- MV.unsafeRead phase 0
@@ -974,7 +1056,12 @@ playStepAt gate p t f = do
     [] -> pure (0, 0)
     channels@(first : _) -> do
       let frames = VU.length first
-      if pos >= fromIntegral (frames - 1) then pure (0, 0) else do
+          -- A note inside its loop never runs off the end: a loop may end on
+          -- the last frame, and the position wraps below instead.
+          looping = case playLoop p of
+            Just _ -> not (playSustainLoop p) || t < gate
+            Nothing -> False
+      if pos >= fromIntegral (frames - 1) && not looping then pure (0, 0) else do
         let i = floor pos :: Int
             x = pos - fromIntegral i
             at ch k = realToFrac (VU.unsafeIndex ch (max 0 (min (frames - 1) k))) :: Double
@@ -1015,8 +1102,9 @@ renderVoice fr seed takeNumber v voice left right sends = do
   seeds <- newSTRef 0
   let curved = pitchMod v /= Flat 0
       freqAt u = if curved then hz v * 2 ** contourAt (pitchMod v) u else hz v
-  node <- compileVoice fr (duration v) (velocity v) seed takeNumber rng seeds 0 (freqAt 0) voice
+  node <- compileVoice fr (duration v) (velocity v) seed takeNumber rng seeds 0 (noteOnFrequency v) voice
   let (i0, i1) = sampleRange fr (MV.length left) (start v) (start v + duration v + voiceTail voice)
+      fade = declick (ringing voice == 0) (duration v)
       (gl, gr) = panGains (pan v)
       go !i
         | i >= i1 = pure ()
@@ -1024,9 +1112,7 @@ renderVoice fr seed takeNumber v voice left right sends = do
             let t = fromIntegral i / fr - start v
                 u = max 0 (min 1 (t / duration v))
             (a, b) <- stepVoice fr (duration v) node t (freqAt u)
-            let e
-                  | loudness v == Flat 1 = gain v
-                  | otherwise = gain v * contourAt (loudness v) u
+            let e = fade t * if loudness v == Flat 1 then gain v else gain v * contourAt (loudness v) u
                 yl = e * gl * a
                 yr = e * gr * b
             addTo left i yl

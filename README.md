@@ -7,6 +7,8 @@ are views, not semantics. Scores render to WAV, MP3 or FLAC audio, to MIDI,
 and optionally to LilyPond piano sheets.
 
 Start with [the language and score guide](docs/2026-09-22-NEOMUSIC-LANGUAGE.md).
+The [composition update](docs/2026-10-21-NEOMUSIC-COMPOSITION.md) records the
+current strength/expression, conductor and pitch-identity contracts and migration.
 The design notes, oldest first, are indexed in [docs/README.md](docs/README.md).
 
 ## Build and run
@@ -18,7 +20,7 @@ dependency's version.
 ```bash
 cabal build all
 cabal test
-cabal run neo-music -- examples/neomusic/twinkle.neomusic
+cabal run neo-music -- check examples/neomusic/twinkle.neomusic
 ```
 
 `cabal repl neomusic` loads the library in GHCi. Audio export needs FFmpeg

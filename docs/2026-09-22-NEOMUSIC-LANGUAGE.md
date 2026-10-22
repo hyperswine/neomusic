@@ -2,6 +2,11 @@
 
 Implemented from `2026-09-22-NEOMUSIC-REVIEW.md` on 2026-09-22: the prerequisite core model,
 text authoring, MIDI, and the first LilyPond piano view (review steps 1–4).
+Updated 2026-10-22 for the composition contracts (strength and expression,
+the written-beat clock, the conductor track, pitch identity; see
+`2026-10-21-NEOMUSIC-COMPOSITION.md`) and the fixes in
+`2026-10-21-NEOMUSIC-BUG-REVIEW.md`. This is the current reference; the dated
+design notes record how each part was reached.
 
 ## Run it
 
@@ -45,6 +50,8 @@ left: (-12 -5):4 (-7 -3):4 (-12 -5):4 (-7 -3):4
 Statements occupy one line, and a line that starts with whitespace continues
 the statement above it; `--` starts a comment. Headers, bindings and voice
 statements can be interleaved, except global tuning must precede instruments.
+A score with more than one part and any tempo change also has a `conductor:`
+line (see tempo, below).
 `tempo` defaults to 120, tuning to 12-EDO at C4, meter to 4 quarter-note beats,
 and the key hint to C major. Instrument declarations are required for voices.
 A `key` or `meter` header affects only the sheet view.
@@ -58,32 +65,50 @@ A `key` or `meter` header affects only the sheet view.
   multi-event argument in brackets.
 - Two **signals** shape each note while it sounds: `pitch s [...]` *adds* `s`
   to every note's pitch, in steps, and `level s [...]` *multiplies* every
-  note's loudness by `s`. Nesting composes exactly: pitches add, levels
-  multiply. A signal is a number (a constant), breakpoints `{u:v ...}` over the
-  note's sounding time (u from 0 to 1, linear between), `a -> b` (short for
-  `{0:a 1:b}`), a wave `sine r` or `square r` (unit amplitude, `r` cycles per
-  beat), `cents c` (a part in cents rather than steps), and `+ - * /` of these
-  (dividing only by a constant). For example: `level (3/4 + 1/4 * sine 4)` is
-  tremolo, `pitch (1/2 + 1/2 * square 8)` a trill with the step above, and
-  `pitch (2 + cents 14)` two steps and 14 cents in any tuning. A level's
-  constant part is the note's strength (0..1); a level that could go below 0
-  is an error. Shapes stretch with the note; oscillation keeps to the beat.
-  See `2026-10-13-NEOMUSIC-SIGNALS.md`.
-- The prelude names the common signals. `vel v` is `level v`, multiplying, so
-  `vel 0.5 [0 vel 0.6 [4] 7]` plays at 0.5, 0.3, 0.5 (notes start at 1, so a
-  single `vel` sets the level, and nothing can exceed the level around it).
-  `swell s` is `level s` (`swell 1/4 -> 1`), `bend s` is `pitch s`
-  (`bend 0 -> -1`, `bend {0:0 1/4:1 1:0}`), `vibrato d` is
-  `pitch (d * sine 3)` (depth `d` steps, 3 cycles a beat), and `cents c` is
-  `pitch (cents c)`.
-- `level across s [...]` and `pitch across s [...]` let a signal span the whole
-  group instead of each note: each note gets the part of `s` within its own
-  sounding time (breakpoints restrict exactly; waves run per note, so they
-  can't span a group). For a level, the value at a note's start becomes part
-  of its strength (velocity), so a crescendo plays louder and brighter, and
-  MIDI velocities follow it. The prelude's `cresc a b [...]` and
-  `dim a b [...]` are `level across a -> b`. The staff marks a run of notes
-  that continues one crescendo or diminuendo once, where it starts. See
+  note's **expression** (its loudness while it sounds) by `s`. Nesting composes
+  exactly: pitches add, levels multiply. A signal is a number (a constant),
+  breakpoints `{u:v ...}` over the note's sounding time (u from 0 to 1, linear
+  between), `a -> b` (short for `{0:a 1:b}`), a wave `sine r` or `square r`
+  (unit amplitude, `r` cycles per beat), `cents c` (a part in cents rather than
+  steps), and `+ - * /` of these (dividing only by a constant). For example:
+  `level (3/4 + 1/4 * sine 4)` is tremolo, `pitch (1/2 + 1/2 * square 8)` a
+  trill with the step above, and `pitch (2 + cents 14)` two steps and 14 cents
+  in any tuning. A level that could go below 0 is an error. Shapes stretch with
+  the note; oscillation keeps to the beat. Signals run in **written** time: the
+  breakpoints span the note's written sounding length and waves count written
+  beats, so under a ritardando a curve slows with the music, and a phrase
+  curve reads the same however the phrase is divided into notes. Sound
+  envelopes (`adsr`, `lfo`) stay in seconds. See `2026-10-13-NEOMUSIC-SIGNALS.md`.
+- **Strength and expression** are separate. A note's *strength* is how hard it
+  is played: one number in 0..1, fixed at the attack. It is MIDI velocity, and
+  a sound's `velocity` input (so it chooses a recording's velocity layer and
+  can brighten a filter). Its *expression* is the `level` signal, multiplying
+  the sound while it plays; MIDI sends it as expression (CC 11). No spelling of
+  a `level` changes strength: `level 0.5` and `level (0.5 -> 0.5)` are the same
+  expression and leave strength alone.
+  - `strength k [...]` multiplies attack strength by the constant `k`;
+    `strength across s [...]` samples `s` at each note's written onset.
+  - `level across s [...]` and `pitch across s [...]` let a signal span the
+    whole group instead of each note: each note gets the part of `s` within its
+    own sounding time (breakpoints restrict exactly; waves run per note, so they
+    can't span a group). `level across` changes expression only.
+  - `dynamics across s [...]` is the coordinated gesture of a written
+    crescendo: each note's strength is `s` at its onset `k`, and its expression
+    the rest of the curve, `s / k`, so attacks and the sound within each note
+    both follow `s`. A note that starts at 0 takes its strength from the
+    curve's peak within it instead, so a crescendo from nothing fades in with
+    rising attacks; a note whose curve never rises above 0 is silent.
+  - The prelude names them: `vel v` is `strength v` (multiplying, so
+    `vel 0.5 [0 vel 0.6 [4] 7]` plays at 0.5, 0.3, 0.5, and nothing exceeds the
+    level around it); `swell s` is `level s` (`swell 1/4 -> 1`); `cresc a b` and
+    `dim a b` are `dynamics across a -> b` (the two names read differently but
+    share one definition: the direction is in `a` and `b`). `bend s` is
+    `pitch s` (`bend 0 -> -1`, `bend {0:0 1/4:1 1:0}`), `vibrato d` is
+    `pitch (d * sine 3)` (depth `d` steps, 3 cycles a beat), and `cents c` is
+    `pitch (cents c)`.
+
+  The staff marks a run of notes that continues one crescendo or diminuendo
+  once, where it starts. See `examples/neomusic/composition.neomusic`,
   `examples/neomusic/orchestral.neomusic` and `2026-10-14-NEOMUSIC-PHRASE.md`.
 - **Humanizing.** Players are never exactly even, and three primitives say so
   (see `2026-10-14-NEOMUSIC-HUMANIZE.md`):
@@ -97,7 +122,7 @@ A `key` or `meter` header affects only the sheet view.
   Across a group, noise continues from where each note starts, so neighbours
   get related values, as a player's are. The prelude builds the usual
   gestures from them:
-  - `vary seed a` makes each note up to `a` softer;
+  - `vary seed a` makes each note's attack up to `a` softer (a `strength across`);
   - `loose seed b` makes it up to `b` beats late;
   - `drift seed c` lets the intonation wander within `c` cents;
   - `humanize seed [...]` is `loose seed 1/48 [vary seed 0.15 [...]]`.
@@ -120,11 +145,36 @@ A `key` or `meter` header affects only the sheet view.
   long-short, the first taking share `s` of the beat (`swing 2/3` is triplet
   swing), `swingPer p s` does the same over `p` beats, and `hold k [...]`
   (`speed 1/k`) holds the group `k` times as long, a fermata when it covers
-  one note. The written notes never change: these shape the
-  performance only. A tempo change acts on everything sounding during its
-  beats, in every voice, so it doesn't matter which hand's line you write it in
-  and the hands can't drift apart. Nested changes multiply. See
-  `examples/neomusic/tempo.neomusic` and `2026-10-12-NEOMUSIC-TIMEMAP.md`.
+  one note. `rit r` and `accel r` are both `speed 1 -> r`; `r` below 1 slows.
+  The written notes never change: these shape the performance only, and
+  nested changes multiply.
+
+  **One clock, one owner.** A tempo change acts on everything sounding during
+  its beats, in every part, so the ensemble shares one clock and parts can't
+  drift apart. When a score has more than one part, that clock belongs to a
+  `conductor:` line: ordinary music over rests that carries the tempo and no
+  notes.
+
+  ```
+  conductor: _:4 rit 2/3 [_:4] speed 2 [speed 2 [_:2]] _:2
+  lead:      0 2 4 7 7:4 [0 4 7 12]:1/2 (0 4 7):2
+  bass:      -12:4 -17:4 -12:2 -12:2
+  ```
+
+  The rules, each an error naming the fix:
+  - a conductor contains rests and tempo, never notes;
+  - a document has at most one conductor;
+  - with a conductor, the instrumental parts contain no tempo;
+  - with more than one part, tempo anywhere needs a conductor ("multi-part
+    scores need an explicit conductor: track");
+  - parallel branches may not own overlapping tempo; nesting one change inside
+    another is intentional and multiplies.
+
+  A single-part score may keep its tempo inline, as a shorthand. The
+  conductor's length counts toward the piece's length. It has no instrument
+  declaration, sheet lane or MIDI channel. See
+  `examples/neomusic/tempo.neomusic`, `examples/neomusic/composition.neomusic`
+  and `2026-10-12-NEOMUSIC-TIMEMAP.md`.
 - `glide f [...]` makes each single note slide into the note that directly
   follows it in the same instrument, over the last fraction `f` of its sound
   (a pitch shape added to the note); chords, rests, the last note, and a note
@@ -135,13 +185,26 @@ A `key` or `meter` header affects only the sheet view.
   add, transposing keeps them, and `inv` mirrors a note's whole pitch signal,
   cents included. A signal applies to every note of an event, so to detune one
   note of a chord write it as a parallel part: `0:4 & cents -14 [4:4] & 7:4`.
-  See `examples/neomusic/cents.neomusic`.
-- `rev` reverses durations and velocities with pitches. When reversing a parallel
-  expression, shorter branches are delayed so the whole passage is mirrored.
+  Cents convert to frequency independently of the step size, so they work in
+  any tuning, including one whose ratio is 1. See
+  `examples/neomusic/cents.neomusic`.
+- `rev` reverses the order of events, with their durations and strengths, and
+  plays each note's own curves backwards: a bend that rises falls, a swell that
+  grows fades, and a glide arrives instead of leaving. Waves and noise keep to
+  the beat. `rev [rev [x]]` is `x`. When reversing a parallel expression,
+  shorter branches are delayed so the whole passage is mirrored, and tempo
+  ramps and cycles run backwards with it.
 - Bindings may refer forward to other bindings. Functions have fixed positional
   arity and consume that many terms. Use brackets to make argument scope explicit:
   `f [0 2]`, `[f 0]*2`. Parameters shadow bindings. Recursive calls, unknown names,
   missing arguments, duplicate bindings/parameters, and malformed values fail.
+- A name the grammar reads as a keyword can't be bound, since it could never
+  be called: `tempo`, `tuning`, `meter`, `key`, `instrument`, `sound`,
+  `reverb`, `master`, `stretch`, `rev`, `inv`, `gate`, `pedal`, `speed`,
+  `cycle`, `pitch`, `level`, `strength`, `dynamics`, `across`, `glide`,
+  `sine`, `square`, `noise`, `start` and `lag` are rejected as binding or
+  parameter names. A parameter also can't be named `cents` (inside a signal it
+  would read as the keyword), though a binding can: the prelude's is.
 - A parameter marked `#` in the signature is a *number*: `hold #k x = speed 1/k [x]`,
   `echo #n #v x = [x vel v [x]]*n`. At the call, a number parameter takes a
   number expression and a music parameter takes a term: `echo 2 1/2 [0 4]`.
@@ -174,9 +237,11 @@ A `key` or `meter` header affects only the sheet view.
 A raw ratio tuning can be written `tuning 440 hz 1.0594630943592953`.
 Pitch names include accidentals and octave: C4, F#3, Bb2. Named tuning accepts
 positive EDO divisions and a reference pitch in MIDI 0–127. Raw-Hz tuning and the
-Haskell API support other references. Header and instrument values (tempo,
-gain, pan, send, vibrato rate, raw tuning) are decimals; everything in the music
-is an exact number expression.
+Haskell API support other references. Header and attribute values (`tempo`,
+`master` and `reverb` settings, and an instrument's `gain`, `pan` and `send`)
+take the music's exact number expressions without names: `tempo 180/2`,
+`gain 1/2`, `pan -1/4`, `reverb hall wet 1/2`. Only a raw tuning's frequency
+and ratio are plain decimals. An error in a header names its line.
 
 Built-in sounds: `basic`, `piano`, `sine`, `saw`, `square`, `pluck`,
 `supersaw`, `reeseBass`, `subBass`, `kick`, `snare`, `hat`, `noiseSweep`.
@@ -184,7 +249,12 @@ Built-in sounds: `basic`, `piano`, `sine`, `saw`, `square`, `pluck`,
 that equals it exactly (a test checks), so that file is what they mean. `piano`
 is a simple synthesized piano-like sound, not a sampled acoustic instrument.
 Instrument attributes are `staff` (`treble`/`bass`), `gain` (nonnegative), `pan`
-(-1..1), and `send` (0..1, the reverb send).
+(-1..1), `send` (0..1, the reverb send), and `pitch pitched` (the default) or
+`pitch unpitched`. Pitch identity is declared, never guessed from the sound:
+audio ignores it, and MIDI and the staff refuse an unpitched instrument until
+a percussion mapping exists. Declare drums `pitch unpitched`
+(`instrument kick = kick pitch unpitched`); a pitched sound with a bend or
+noise in it stays pitched.
 
 **Sounds.** `sound NAME [from BASE]` defines a sound, starting from another
 sound in the file or a built-in (without `from`, from `basic`). Its parts,
@@ -231,8 +301,15 @@ sound flute = gain (velocity * adsr 0.08 0.2 0.85 0.15)
     (tone triangle + gain (0.3 * adsr 0.03 0.12 0.2 0.1) (bandpass key 0.6 noise))
 ```
 
-A voice sounds until note-off plus the longest `release` in its gains, so give
-it an amplitude envelope. The part-by-part form (`sound x from y ...`) is
+How long a voice sounds after note-off:
+- a `gain` whose envelope releases (`adsr`, `release`, or a product with one)
+  ends everything under it when its release ends;
+- otherwise the longest release counts, and a plucked string rings out its own
+  decay, as a string does;
+- a voice with nothing to end it (a tone, noise or recording with no release
+  above it) stops at note-off, faded over 2 ms rather than cut on a click.
+
+So give a sustained voice an amplitude envelope with the release you want. The part-by-part form (`sound x from y ...`) is
 shorthand for the classic voice, a mix of oscillators low-passed,
 high-passed and shaped by `amp`, all under `pitch`; it can start only from a
 classic sound. `examples/neomusic/orchestral.neomusic` voices a whole cue this
@@ -274,7 +351,8 @@ recording stops at note-off. A note outside every region is an error.
   layouts first.
 
 **Mix.** `reverb [hall|none] [room x] [damping x] [width x] [wet x]
-[predelay x]` sets the reverb, starting from none unless `hall` is named.
+[predelay x]` sets the reverb, starting from none unless `hall` is named. Its
+values, like `master`'s, are exact numbers (`wet 1/2`).
 `reverb space "impulse.wav" [wet x] [predelay x]` uses a recorded room
 instead: the reverb bus is convolved with the impulse response, normalised to
 unit energy, so `wet` (default 0.3) is the room's level against what is sent
@@ -292,7 +370,7 @@ Modules, each depending only on the ones above it:
 | `NeoMusic.Pitch` | `Step`, `Tuning`, `freq`, `equalTemperament` |
 | `NeoMusic.Recording` | WAV reading (`Recording`, read on first use) and SFZ instruments (`SampleSet`, `Region`, `parseSfz`, `readSampleSet`) |
 | `NeoMusic.Audio` | the synthesis engine in Hz and seconds: `Voice` (sources `Tone`, `Noise`, `Plucked`, `Sampled`; shapers `Gain`, `Bend`, `Lowpass`, `Highpass`, `Bandpass`, `Unison`, `Pan`; mixing `:&`; `Classic` patches, see `2026-10-14-NEOMUSIC-VOICE.md`), `Patch` (oscillators, and `amp`, `pitch` and `cutoff` as `Mod` signals over seconds: `adsr`, `cutoffHz`, `filterCutoff`, `Lfo`, `Velocity`, `Key`...) and presets, `Note`/`Timeline`, `Mix`, `renderTimelineMix`, export; see `2026-10-14-NEOMUSIC-PATCH.md` |
-| `NeoMusic.Score` | the unitless score, `Performance`, `validate`, `render` (beats to seconds, once) |
+| `NeoMusic.Score` | the unitless score, `Performance`, `arrange`, `validate`, `render` (beats to seconds, once) |
 | `NeoMusic.Language`, `.Midi`, `.Numeric`, `.Sheet` | the text format and the views |
 Import the modules you need. `Score` and `Audio` share some field names
 (`gain`, `pan`, `send`): an instrument's and a rendered
@@ -311,7 +389,7 @@ S.writeAudio "music.wav" perf music
 S.render perf music
 ```
 
-`Event { dur, gate, lag, pitches, pitchShift, level }` keeps all axes together. Empty `pitches`
+`Event { dur, gate, lag, pitches, strength, pitchShift, level }` keeps all axes together. Empty `pitches`
 means rest. `dur` is the time the event occupies, so the next event starts after
 it; `gate` is how long it sounds, as a ratio of `dur` (1 as written, below 1
 detached, above 1 ringing on). Because the gate is a ratio, `stretch` keeps
@@ -335,24 +413,41 @@ and `tempoNodes` lists each node with its written start and length. `render`
 is the only place the clock meets `bpm`. `rev` reverses ramps and runs a
 cycle's segments backwards, each mirrored, so swing becomes short-long (exact
 when the extent is a whole number of periods); `stretch` scales a node's
-extent and its cycle lengths.
+extent and its cycle lengths. `exactSpeedAt` gives the exact combined factor
+at a beat when every node over it is a constant speed, so the reading views
+never round exact tempos through floating point.
 
-`pitchShift` and `level` are `Signal`s (`NeoMusic.Signal`, re-exported by
-`Score`): `Const`, `Points`, `Osc Sine|Square rate`, `:+:`, `:*:` and `Cents`.
-`addPitch` (what `pitch` does) and `scaleLevel` (what `level` does) add and
-multiply them; `vel` is a level's constant part, the note's strength.
+`arrange conductor parts` builds a score with one explicit clock owner and
+checks the conductor rules above; an existing score migrates with
+`arrange (conductorOf s) [withoutTempo s]`. `Tempo` remains for whole-score
+and single-part construction, and `flatten` rejects overlapping tempo from
+parallel siblings. `scaleScore` and `reverseScore` stretch and reverse whole
+scores, tempo included.
+
+`pitchShift`, `level` and `strength` are `Signal`s (`NeoMusic.Signal`,
+re-exported by `Score`): `Const`, `Points`, `Osc Sine|Square rate`, `:+:`,
+`:*:`, `Cents`, `Noise` and `Start`. `addPitch` (what `pitch` does) and
+`scaleLevel` (what `level` does) add and multiply; `scaleStrength` (what
+`strength` and `vel` do) multiplies the attack strength, which must be a
+constant in 0..1 (it may keep its provenance, e.g. `Start (Noise ...)`, so
+reading views can tell humanizing from written dynamics). `strengthAcross`,
+`levelAcross`, `dynamicsAcross`, `pitchAcross` and `lagAcross` are the
+`across` forms. `vel` reads an event's strength. Migrating: code that used
+`scaleLevel (Const k)` for velocity should use `scaleStrength (Const k)`.
 `glide :: Rational -> Score -> Score` works on a whole score so it can join
-notes that sit in separate lines. `render` splits each signal: constant pitch
-terms go into the note's frequency and a level's constant factors into its
-velocity, and only the varying parts become the audio `Note`'s `pitchMod`
-(octaves) and `loudness` contours, evaluated every sample. Notes without
-varying parts take the plain path and render exactly as before.
+notes that sit in separate lines. `render` evaluates strength once per note as
+the audio `Note`'s `velocity`; constant pitch terms go into its frequency, and
+only the varying parts become its `pitchMod` (octaves) and `loudness`
+contours, lowered through the written-beat clock (a `Warp` over each note's
+span) and evaluated every sample. Notes without varying parts take the plain
+path.
 
 `Score` has `Line name phrase`, `Silence beats`, sequential `:>>:` and parallel
 `:||:`. Sequential composition has `Semigroup`/`Monoid` instances with `Silence 0`
 as identity. There are no audio/mixer nodes in this tree. A separate `Performance`
-contains one tempo, named `Instrument` records (tuning/patch/gain/pan/send), and a
-`Mix`. Per-instrument tuning is still possible without assigning local tempos.
+contains one tempo, named `Instrument` records
+(tuning/patch/gain/pan/send/`pitchIdentity`), and a `Mix`. Per-instrument tuning
+is still possible without assigning local tempos.
 
 `validate` checks a performance against a score without rendering: tempo, every
 declared instrument's tuning, patch, gain, pan and send, and that every line
@@ -402,6 +497,9 @@ systems where something changes. Each change's start and end are columns of
 their own, so the annotation is directly above the music it shapes:
 `speed 1 -> 3/4`, `swing 2/3`, `hold 2`, then `a tempo` or `straight` where it
 ends (unless an earlier change is still going; a hold needs no end mark).
+Where changes are nested, the lane shows the combined clock instead: exact
+products where they exist (`speed 2 [speed 2 [...]]` reads `speed 4`), and
+`~` with six decimals inside a ramp.
 This view accepts microtones and arbitrary rational rhythms because it displays
 the score without imposing a tuning or traditional notation. A cents offset is
 part of the pitch, so it is shown exactly: `4-14c`.
@@ -426,25 +524,32 @@ traditional engraving an explicit alternative.
 **MIDI:** SMF type 1, a conductor tempo track and pitched tracks using GM piano
 (program 0). It preserves pitches, gated sounding lengths (note-off at
 `onset + dur × gate`, extending the track if a note rings past the end) and
-per-event velocity. Ticks stay in written beats; the shared clock becomes the
+strength as velocity. Ticks stay in written beats; the shared clock becomes the
 conductor track's tempo changes (`tempoChanges` exposes them). Constant
 stretches are one change each. A ramp is stepped at every note-on and note-off
-inside it and at least every 1/4 beat, each step lasting exactly as long as the
-clock says; integer microseconds per quarter are the only rounding, carried
-into the next step, so every note lands within a microsecond of the audio
-render (a test plays the tempo map back to check). Swing is two changes per
-beat. A curved note (bend, vibrato or swell) gets a channel no overlapping note
-shares, because pitch bend and expression act on a whole channel; its channel
-sets the pitch-bend range (RPN 0) to the smallest whole number of semitones
-that covers its curves, and the bend wheel and expression (CC 11) are sampled
-every 1/64 beat, positioned through the tempo clock, then reset at the
-note-off. Expression above 1 is clipped to full. Custom synth patches, gain/pan/reverb are not reproduced. Steps must use 12-EDO
-with an exactly aligned 12-TET reference (floating-point tolerance applies).
-No pitch rounding. Notes must fit MIDI 0–127. Unpitched sounds require a future
-percussion mapping and are rejected: a sound is unpitched when every part of
-it is, where noise is unpitched and so is anything under a bend that starts
-away from 0 (a drop into the note). Overlapping unisons get separate channels;
-channel exhaustion beyond 15 pitched channels is an error. Off events precede
+inside it, where the notes actually sound (lags included, rounded to the tick
+grid as the notes are), and at least every 1/4 beat, each step lasting exactly
+as long as the clock says; integer microseconds per quarter are the only
+rounding, carried into the next step, so every note lands within a
+microsecond of the audio render (a property test plays the tempo map back,
+with lags). Swing is two changes per beat. Tempo limits apply to the tempos
+actually emitted, so a slow base tempo under a fast conductor exports.
+
+Pitch bend and expression act on a whole channel, so a curved note (bend,
+vibrato, cents, or any expression other than 1) shares its channel only with
+notes that overlap it under exactly the same curves, as a chord's tones do;
+each such curve is sent once per channel. The channel sets the pitch-bend
+range (RPN 0) to the smallest whole number of semitones that covers its
+curves, and the bend wheel and expression (CC 11) are sampled every 1/64
+written beat, placed through the tempo clock, then reset at the note-off.
+Expression above 1 is clipped to full. Custom synth patches, gain/pan/reverb
+are not reproduced. Steps must use 12-EDO with an exactly aligned 12-TET
+reference (floating-point tolerance applies). No pitch rounding. Notes must fit
+MIDI 0–127. An instrument declared `pitch unpitched` is rejected until a
+percussion mapping exists; nothing is inferred from its sound. Overlapping
+unisons get separate channels; channel exhaustion beyond 15 pitched channels
+is an error (overlapping notes under *different* curves, such as a humanized
+`cresc` over chords, can reach it). Off events precede
 on events at the same tick. Beat resolution is selected by LCM for exact rhythm,
 and rejected above 32767 ticks/quarter. Tempo rounds to the nearest microsecond
 per quarter, as required by SMF; timing/gates exclude synth release and reverb.
@@ -458,7 +563,10 @@ segment. A pedal therefore shows as let-ring ties on each note, not as a
 so the notes stay as written: a speed is a metronome mark, a ramp "rit." or
 "accel." then "a tempo", swing "Swing" then "Straight", any other cycle
 "cycling tempo" then "a tempo", and a hold over a
-single onset a `\fermata` on its notes. A bend that ends higher or lower draws
+single onset a `\fermata` on its notes. Nested changes are engraved from
+the combined clock: exact metronome marks where the factors multiply exactly
+(`speed 2 [speed 3/2 [...]]` at 120 is `4 = 360`), and a rounded `~` BPM inside
+a ramp. A bend that ends higher or lower draws
 a `\glissando` to the next note in its voice; other bends are marked "bend",
 vibrato "vib.", a growing or fading swell "cresc." or "dim.", and one that does
 both an `\espressivo`. A cents offset is a mark like "-14¢" above the note,
@@ -477,8 +585,8 @@ also passed to `engrave`, because a score alone cannot determine physical pitch.
 Fractional tempo marks are written as exact BPM text instead of rounded integers.
 
 Later review items remain separate work: tuplets, MusicXML, automatic hand split,
-dynamic marks, signal-graph synthesis, cents offsets, non-equal tuning functions,
-and the keyboard state machine. The compiler rejects unsupported view inputs
+dynamic marks, a percussion mapping for unpitched instruments, non-equal tuning
+functions, and the keyboard state machine. The compiler rejects unsupported view inputs
 rather than silently approximating them.
 
 ## Migration and validation
@@ -493,9 +601,12 @@ drive the engine through the score API. The legacy `Sine`, `Saw` and `Square`
 timbres survive as the `sinePatch`, `sawPatch` and `squarePatch` presets.
 
 Tests cover phrase/score laws, exact timing, semantic source round trips,
-functions and syntax errors, MIDI bounds/unisons, and four golden sheet views:
-scale, Twinkle, overlapping voices, and a chord tied across a barline. The full
-Stack suite also covers existing audio, CPU and PSRAM behavior. Export checks
+functions and syntax errors, MIDI bounds/unisons/shared curves, the strength,
+clock, conductor and pitch-identity contracts, and four golden sheet views:
+scale, Twinkle, overlapping voices, and a chord tied across a barline. The
+audio suite covers the engine, voices, recordings, rooms and its edge cases
+(loops, releases, note-on pitch, ringing and declicking). `cabal test` runs
+both. Export checks
 use an independent MIDI reader, actual LilyPond compilation and visual PDF
 inspection, and FFmpeg decoding of WAV/MP3/FLAC.
 

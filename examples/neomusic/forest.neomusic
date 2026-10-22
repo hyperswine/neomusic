@@ -18,9 +18,9 @@ master drive 1.2 peak 0.89 tail 2
 instrument lead  = flute staff treble gain 0.5 pan 0.15 send 0.35
 instrument pad   = warmPad staff treble gain 0.22 send 0.5
 instrument bass  = reeseBass staff bass gain 0.5
-instrument kick  = kick gain 0.9
-instrument snare = snare gain 0.35 send 0.2
-instrument hat   = hat gain 0.18 pan -0.3
+instrument kick  = kick pitch unpitched gain 0.9
+instrument snare = snare pitch unpitched gain 0.35 send 0.2
+instrument hat   = hat pitch unpitched gain 0.18 pan -0.3
 
 -- Harmony: Am F C G, one bar each.
 Am = (-3 0 4)
@@ -44,7 +44,9 @@ a2 = [14 12 9 7]:1/2 9:2
 a3 = [12 14 16 19]:1/2 16:2
 a4 = [14 12]:1/2 bend {0:0 1/2:0 1:-2} [9:3]
 tuneA = a1 a2 a3 a4
-tuneB = staccato [up 5 [a1 a2]] a3 rit 3/4 [hold 2 [21:4]]
+tuneB = staccato [up 5 [a1 a2]] a3 21:4
+
+conductor: _:44 rit 3/4 [hold 2 [_:4]]
 
 lead:  _:16 tuneA tuneB
 pad:   swell 1/3 -> 1 [prog] prog prog

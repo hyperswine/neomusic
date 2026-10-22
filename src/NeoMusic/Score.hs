@@ -1,18 +1,20 @@
 -- | Unitless music. Interpretation is supplied once, outside the score tree.
 module NeoMusic.Score
-  ( Event(..), Phrase, Name, Score(..), Shape(..), Instrument(..), Performance(..)
+  ( Event(..), Phrase, Name, Score(..), Shape(..), PitchIdentity(..), Instrument(..), Performance(..)
   , steady, swung, speedOf, swingOf, shapeSource
-  , TimeMap, timeMap, timePieces, performed, tempoNodes, hold
+  , TimeMap, timeMap, timePieces, performed, tempoNodes, tempoSpans, exactSpeedAt, overlappingTempo, hold
   , module NeoMusic.Signal
-  , addPitch, scaleLevel, levelAcross, pitchAcross, addLag, lagAcross, glide, vel, pitchParts, levelParts, bendMotion, swellMotion, vibrates
+  , addPitch, scaleStrength, strengthAcross, scaleLevel, levelAcross, dynamicsAcross, pitchAcross, addLag, lagAcross, glide, vel, pitchParts, bendMotion, swellMotion, vibrates
   , BeatEvent(..), n, chord, rest, hit, hush, transpose, invert, retro, stretch
   , withRhythm, withGate, scaleGate, staccato, pedal
-  , mapPhrases, scoreLength, flatten, validate, render, writeAudio
+  , mapPhrases, scaleScore, reverseScore, arrange, conductorOf, withoutTempo, scoreLength, flatten, validate, render, writeAudio
   , defaultInstrument, defaultPerformance
   ) where
 
 import Control.Monad (unless, forM_)
 import qualified Data.Map.Strict as M
+import Data.List (nub, sort)
+import GHC.Float (expm1)
 import Data.Ratio (denominator, numerator)
 import qualified NeoMusic.Audio as A
 import NeoMusic.Pitch (Step(..), Tuning(..), freq)
@@ -30,10 +32,11 @@ type Name = String
 -- Two signals shape a note while it sounds: 'pitchShift' is added to every
 -- pitch, in steps ('Cents' parts in cents), and 'level' multiplies its
 -- loudness. Pitch signals add and level signals multiply, so nesting composes
--- exactly. Rests have level 0 and ignore both.
+-- exactly. Attack strength is independent of expression; no signal syntax
+-- determines velocity. Rests have strength 0 and ignore these transforms.
 data Event = Event
   { dur :: Rational, gate :: Rational, lag :: Rational, pitches :: [Step]
-  , pitchShift :: Signal, level :: Signal }
+  , strength :: Signal, pitchShift :: Signal, level :: Signal }
   deriving (Eq, Show)
 
 type Phrase = [Event]
@@ -86,8 +89,13 @@ infixr 4 :||:
 instance Semigroup Score where (<>) = (:>>:)
 instance Monoid Score where mempty = Silence 0
 
+-- | How score pitches are interpreted by notation/MIDI. This is declared by
+-- the instrument, never guessed from its synthesis graph.
+data PitchIdentity = Pitched | Unpitched deriving (Eq, Show)
+
 data Instrument = Instrument
-  { tuning :: Tuning, timbre :: A.Voice, gain :: Double, pan :: Double, send :: Double }
+  { tuning :: Tuning, timbre :: A.Voice, gain :: Double, pan :: Double, send :: Double
+  , pitchIdentity :: PitchIdentity }
   deriving (Eq, Show)
 data Performance = Performance
   { bpm :: Double, instruments :: M.Map Name Instrument, mix :: A.Mix }
@@ -96,7 +104,7 @@ data BeatEvent = BeatEvent { onset :: Rational, instrument :: Name, event :: Eve
   deriving (Eq, Show)
 
 defaultInstrument :: Instrument
-defaultInstrument = Instrument (Tuning (440 * 2 ** (-9/12)) (2 ** (1/12))) (A.Classic A.pianoPatch) 1 0 0
+defaultInstrument = Instrument (Tuning (440 * 2 ** (-9/12)) (2 ** (1/12))) (A.Classic A.pianoPatch) 1 0 0 Pitched
 defaultPerformance :: Performance
 defaultPerformance = Performance 120 M.empty (A.defaultMix 44100)
 
@@ -107,16 +115,27 @@ chord xs = hit xs 1 1
 rest :: Phrase
 rest = hush 1
 hit :: [Int] -> Rational -> Double -> Phrase
-hit xs d v = [Event d 1 0 (map Step xs) (Const 0) (Const (toRational v))]
+hit xs d v = [Event d 1 0 (map Step xs) (Const (toRational v)) (Const 0) (Const 1)]
 hush :: Rational -> Phrase
-hush d = [Event d 1 0 [] (Const 0) (Const 0) | d /= 0]
+hush d = [Event d 1 0 [] (Const 0) (Const 0) (Const 1) | d /= 0]
 transpose :: Int -> Phrase -> Phrase
 transpose k = map (\e -> e {pitches = [Step (x+k) | Step x <- pitches e]})
 invert :: Phrase -> Phrase
 -- Mirroring a pitch around 0 mirrors its offset too.
 invert = map (\e -> e {pitches = [Step (negate x) | Step x <- pitches e], pitchShift = negateSignal (pitchShift e)})
+-- | Retrograde: the events in reverse order, and each note's own curves
+-- played backwards too (a rising bend falls, a crescendo within a note
+-- becomes a diminuendo), as 'reverseScore' mirrors tempo ramps. Waves and
+-- noise keep to the beat and onset values stay with their notes.
 retro :: Phrase -> Phrase
-retro = reverse
+retro = reverse . map (\e -> e {pitchShift = mirror (pitchShift e), level = mirror (level e)})
+  where
+    mirror sig = case sig of
+      Points ps -> Points (reverse [(1 - u, v) | (u, v) <- ps])
+      a :+: b -> mirror a :+: mirror b
+      a :*: b -> mirror a :*: mirror b
+      Cents a -> Cents (mirror a)
+      other -> other
 stretch :: Rational -> Phrase -> Phrase
 stretch k = map (\e -> e {dur = k * dur e, lag = k * lag e})
 -- | Set every event's gate, replacing whatever was there.
@@ -132,6 +151,10 @@ staccato = scaleGate (1/2)
 -- | Add a pitch signal to every note: @addPitch a . addPitch b = addPitch (a + b)@.
 addPitch :: Signal -> Phrase -> Phrase
 addPitch sig = map (\e -> if null (pitches e) then e else e {pitchShift = plus sig (pitchShift e)})
+
+-- | Attack strength, independent of the expression signal. Multiplicative.
+scaleStrength :: Signal -> Phrase -> Phrase
+scaleStrength k = map (\e -> if null (pitches e) then e else e {strength = times k (strength e)})
 
 -- | Multiply every note's level: @scaleLevel a . scaleLevel b = scaleLevel (a * b)@.
 scaleLevel :: Signal -> Phrase -> Phrase
@@ -149,15 +172,9 @@ pitchParts sig = (sum steps, sum cs, foldr plus (Const 0) varying)
       Cents a -> constantValue a /= Nothing
       _ -> constantValue t /= Nothing
 
--- | A level's constant part (the note's strength) and its varying rest.
-levelParts :: Signal -> (Rational, Signal)
-levelParts sig = (product [k | Just k <- map constantValue fs], foldr times (Const 1) [f | f <- fs, constantValue f == Nothing])
-  where fs = factors sig
-
--- | The note's strength, its level's constant part: MIDI velocity, and what
--- velocity-to-cutoff responds to.
+-- | Attack strength: MIDI velocity and the sound's velocity input.
 vel :: Event -> Double
-vel = fromRational . fst . levelParts . level
+vel e = maybe (valueAt 0 0 0 (strength e)) fromRational (constantValue (strength e))
 
 -- | The pitch signal's shape: up, down, or away and back (oscillation ignored).
 bendMotion :: Event -> Motion
@@ -165,7 +182,7 @@ bendMotion = motion . pitchShift
 
 -- | The varying level's shape: growing, fading, or both.
 swellMotion :: Event -> Motion
-swellMotion = motion . snd . levelParts . level
+swellMotion = motion . level
 
 -- | Whether the pitch oscillates (vibrato, trill).
 vibrates :: Event -> Bool
@@ -213,19 +230,40 @@ pedal score = fst (go 0 score)
     go at (a :||: b) = let (a', ta) = go at a; (b', tb) = go at b in (a' :||: b', max ta tb)
     go at (Tempo shape s) = let (s', t) = go at s in (Tempo shape s', t)
 
--- | A level signal spanning the whole score rather than each note (a
--- crescendo over a passage). Each note gets the part of the signal within its
--- sounding time; its value at the note's start joins the note's strength, so
--- a crescendo plays louder (velocity, and velocity-to-cutoff), and only the
--- rest of the shape varies within the note. See docs/2026-10-14-NEOMUSIC-PHRASE.md.
+-- | Expression over a group. It never changes attack strength.
 levelAcross :: Signal -> Score -> Either String Score
-levelAcross = across (\piece e -> Right e {level = times (strengthFirst piece) (level e)})
+levelAcross = across (\piece e -> Right e {level = times piece (level e)})
+
+-- | Sample a group signal at each note's written onset for its attack strength.
+strengthAcross :: Signal -> Score -> Either String Score
+strengthAcross = across $ \piece e -> do
+  _ <- onsetLevel piece
+  pure e {strength = times (Start piece) (strength e)}
+
+-- | A coordinated dynamic gesture: attack strength follows the onset value,
+-- expression follows the remaining curve. Unlike 'levelAcross', this changes
+-- both controls. A note starting from silence takes its strength from the
+-- curve's peak within it instead, so the fade-in sounds and attacks still
+-- rise through the gesture (a neutral strength of 1 would make the first
+-- note of a crescendo from nothing its loudest attack). A note whose curve
+-- never rises above zero keeps neutral strength and stays silent.
+dynamicsAcross :: Signal -> Score -> Either String Score
+dynamicsAcross = across $ \piece e -> do
+  k <- onsetLevel piece
+  let peak = snd (signalBounds piece)
+      (attack, held) | k /= 0 = (k, Start piece)
+                     | peak > 0 = (peak, Const peak)
+                     | otherwise = (1, Const 1)
+  pure e {strength = times held (strength e),
+          level = times (normalize attack piece) (level e)}
   where
-    strengthFirst piece = case piece of
-      Points ps@((_, v0) : _) | v0 /= 0 ->
-        let shape = [(u, y / v0) | (u, y) <- ps]
-        in times (Const v0) (if all ((== 1) . snd) shape then Const 1 else Points shape)
-      _ -> piece
+    normalize k (Points ps) = Points [(u, v / k) | (u, v) <- ps]
+    normalize k sig = times (Const (1 / k)) sig
+
+onsetLevel :: Signal -> Either String Rational
+onsetLevel sig
+  | hasCents sig = Left "cents only make sense in a pitch"
+  | otherwise = maybe (Left "strength needs an exact value at the note's start") Right (exactAt 0 0 sig)
 
 -- | A pitch signal spanning the whole score rather than each note.
 pitchAcross :: Signal -> Score -> Either String Score
@@ -279,6 +317,60 @@ mapPhrases f = go
     go (a :||: b) = go a :||: go b
     go (Tempo shape s) = Tempo shape (go s)
 
+scaleScore :: Rational -> Score -> Score
+scaleScore k (Silence d) = Silence (k*d)
+scaleScore k (Line name xs) = Line name (stretch k xs)
+scaleScore k (a :>>: b) = scaleScore k a :>>: scaleScore k b
+scaleScore k (a :||: b) = scaleScore k a :||: scaleScore k b
+scaleScore k (Tempo shape s) = Tempo (scaled shape) (scaleScore k s)
+  where
+    scaled (Cycle segs) = Cycle [(k * l, scaled sub) | (l, sub) <- segs]
+    scaled other = other
+reverseScore :: Score -> Score
+reverseScore (Line name xs) = Line name (retro xs)
+reverseScore (Silence d) = Silence d
+reverseScore (a :>>: b) = reverseScore b :>>: reverseScore a
+-- A ramp runs backwards; a cycle's segments run in reverse order, each mirrored,
+-- so swing becomes short-long (exact when the extent is a whole number of
+-- periods, since periods are counted from the node's start).
+reverseScore (Tempo shape s) = Tempo (mirrored shape) (reverseScore s)
+  where
+    mirrored (Ramp a b) = Ramp b a
+    mirrored (Cycle segs) = Cycle (reverse [(l, mirrored sub) | (l, sub) <- segs])
+reverseScore (a :||: b) =
+  let da = scoreLength a
+      db = scoreLength b
+      total = max da db
+  in (Silence (total-da) :>>: reverseScore a) :||: (Silence (total-db) :>>: reverseScore b)
+
+
+-- | Assemble one explicit conductor and independent musical parts. Conductor
+-- material occupies written time but may not contain pitched events.
+arrange :: Score -> [Score] -> Either String Score
+arrange conductor parts = do
+  (_, es) <- flatten conductor
+  unless (all (null . pitches . event) es) (Left "a conductor track contains rests and tempo, not notes")
+  unless (all (null . tempoNodes) parts)
+    (Left "instrumental parts contain tempo; move it to the conductor track")
+  let result = conductorOf conductor :||: foldr (:||:) (Silence 0) parts
+  _ <- flatten result
+  pure result
+
+-- | Keep written structure and tempo, replacing all events with silence.
+-- Useful for migrating an existing score to explicit conductor ownership.
+conductorOf :: Score -> Score
+conductorOf (Line _ xs) = Silence (sum (map dur xs))
+conductorOf (Silence d) = Silence d
+conductorOf (a :>>: b) = conductorOf a :>>: conductorOf b
+conductorOf (a :||: b) = conductorOf a :||: conductorOf b
+conductorOf (Tempo shape s) = Tempo shape (conductorOf s)
+
+withoutTempo :: Score -> Score
+withoutTempo (Tempo _ s) = withoutTempo s
+withoutTempo (a :>>: b) = withoutTempo a :>>: withoutTempo b
+withoutTempo (a :||: b) = withoutTempo a :||: withoutTempo b
+withoutTempo s = s
+
 -- | Exact beat onsets, shared by audio, MIDI and engraving. Rests remain events.
 flatten :: Score -> Either String (Rational, [BeatEvent])
 flatten = go 0
@@ -289,10 +381,10 @@ flatten = go 0
       unless (all (\e -> validPoints (pitchShift e) && validPoints (level e)) xs)
         (Left "signal points need u within 0..1, in nondecreasing order")
       unless (all (not . hasCents . level) xs) (Left "cents only make sense in a pitch")
-      -- The constant part is the strength (0..1); the whole level never goes below 0.
-      unless (all (\e -> let (k, _) = levelParts (level e) in k >= 0 && k <= 1) xs)
-        (Left "a note's level must have a constant part within 0..1")
-      unless (all (\e -> fst (signalBounds (snd (levelParts (level e)))) >= 0) xs)
+      unless (all (\e -> not (hasCents (strength e)) && validPoints (strength e)
+                          && maybe False (\k -> k >= 0 && k <= 1) (constantValue (strength e))) xs)
+        (Left "a note's strength must be within 0..1")
+      unless (all (\e -> fst (signalBounds (level e)) >= 0) xs)
         (Left "a level cannot go below 0")
       let onsets = scanl (+) at (map dur xs)
       unless (and [t + lag e >= 0 | (t, e) <- zip onsets xs, not (null (pitches e))])
@@ -306,6 +398,8 @@ flatten = go 0
       (db, nb) <- go (at+da) b
       pure (da+db, na++nb)
     go at (a :||: b) = do
+      unless (not (or [overlap x y | x <- tempoNodes a, y <- tempoNodes b]))
+        (Left "parallel branches own overlapping tempo; put the shared tempo around the ensemble or in one conductor track")
       (da, na) <- go at a
       (db, nb) <- go at b
       pure (max da db, na++nb)
@@ -364,7 +458,7 @@ timeMap score = TimeMap (M.fromList (scan 0 0 merged))
 logLinear :: Double -> Double -> Double -> Double
 logLinear la k x
   | k == 0 = x * exp (negate la)
-  | otherwise = exp (negate la) * (1 - exp (negate k * x)) / k
+  | otherwise = exp (negate la) * negate (expm1 (negate k * x)) / k
 
 -- | The clock's pieces: written start, written end, log slope per beat (0 = constant).
 timePieces :: TimeMap -> [(Rational, Rational, Double)]
@@ -376,6 +470,35 @@ performed (TimeMap m) b = case M.lookupLE b m of
   Just (u, (v, la, k, start))
     | b < v -> start + logLinear la k (fromRational (b - u))
     | otherwise -> start + logLinear la k (fromRational (v - u)) + fromRational (b - v)
+
+-- | Effective tempo factors at both ends of each log-linear clock segment,
+-- including straight gaps. These describe the combined clock, not its syntax.
+tempoSpans :: Score -> [(Rational, Rational, Double, Double)]
+tempoSpans score = [(a,b,rate a a,rate a b) | (a,b) <- zip bounds (drop 1 bounds)]
+  where
+    TimeMap m = timeMap score
+    total = scoreLength score
+    bounds = sort (nub (0 : total : [t | (a,(b,_,_,_)) <- M.toList m, t <- [a,b], t >= 0, t <= total]))
+    rate at t = case M.lookupLE at m of
+      Just (a,(b,la,k,_)) | at < b -> exp (la + k * fromRational (t-a))
+      _ -> 1
+
+-- | The exact combined speed factor at a written beat, when every tempo node
+-- covering it is a constant speed (nested factors multiply exactly);
+-- 'Nothing' inside a ramp or cycle. Reading views use this so exact tempos
+-- never pass through floating point.
+exactSpeedAt :: Score -> Rational -> Maybe Rational
+exactSpeedAt score t = product <$> mapM speedOf [shape | (u, d, shape) <- tempoNodes score, u <= t, t < u + d]
+
+-- | More than one tempo factor active at once (intentional nesting). Reading
+-- views use the effective clock here instead of displaying conflicting marks.
+overlappingTempo :: Score -> Bool
+overlappingTempo score = or [overlap a b | (i,a) <- zip [0::Int ..] nodes, b <- drop (i+1) nodes]
+  where nodes = tempoNodes score
+
+overlap :: (Rational,Rational,Shape) -> (Rational,Rational,Shape) -> Bool
+overlap (a,da,sa) (b,db,sb) = da > 0 && db > 0 && a < b+db && b < a+da
+  && speedOf sa /= Just 1 && speedOf sb /= Just 1
 
 -- | Check a performance against a score without rendering it: tempo, every
 -- declared instrument, and that every line names a declared instrument.
@@ -407,30 +530,77 @@ render performance score = do
   (total,es) <- flatten score
   let clock = timeMap score
       seconds beats = performed clock beats * (60 / bpm performance)
-      -- Constant parts become the note's frequency and strength; only the
-      -- varying parts reach the engine's per-sample path.
-      ns = [ A.Note (seconds (onset e + lag ev)) hz
+  -- Constant pitch terms become frequency; strength is explicit. Only the
+  -- varying parts reach the engine's per-sample path.
+  ns <- sequence [ (\pitchMod -> A.Note (seconds (onset e + lag ev)) hz
                (seconds (onset e + lag ev + dur ev * gate ev) - seconds (onset e + lag ev))
-               (timbre i) (fromRational strength) (gain i) (pan i) (send i) pitchMod loud
+               (timbre i) (vel ev) (gain i) (pan i) (send i) (musical pitchMod) loud)
+                 <$> pitchContour octavesPerStep soundingBeats varyingPitch
            | e <- es, let ev = event e, let i = instruments performance M.! instrument e, step <- pitches ev
            , let octavesPerStep = logBase 2 (ratio (tuning i))
-                 stepsPerCent = 1 / (1200 * octavesPerStep)
                  soundingBeats = fromRational (dur ev * gate ev)
                  (constSteps, constCents, varyingPitch) = pitchParts (pitchShift ev)
-                 (strength, varyingLevel) = levelParts (level ev)
+                 varyingLevel = level ev
                  base = freq (tuning i) step * 2 ** (fromRational constCents / 1200)
                  hz = if constSteps == 0 then base else base * ratio (tuning i) ** fromRational constSteps
-                 pitchMod = if varyingPitch == Const 0 then A.Flat 0
-                            else A.Flat octavesPerStep A.:*. contour stepsPerCent soundingBeats varyingPitch
-                 loud = if varyingLevel == Const 1 then A.Flat 1 else contour 0 soundingBeats varyingLevel ]
+                 loud = if varyingLevel == Const 1 then A.Flat 1 else musical (contour 0 soundingBeats varyingLevel)
+                 musical = clockContour clock (onset e + lag ev) (dur ev * gate ev) ]
   unless (all (\v -> finite (A.start v) && positive (A.duration v) && positive (A.hz v)) ns
           && finite (seconds total)) (Left "score time or pitch cannot be represented in seconds and Hz")
   pure (A.Timeline (seconds total) ns)
 
+-- | Lower pitch to octaves without first dividing cents by the step size.
+-- A ratio of 1 has zero-sized steps, but cents still have their usual meaning.
+-- Addition and unitless multiplication preserve that independent conversion.
+pitchContour :: Double -> Double -> Signal -> Either String A.Contour
+pitchContour octavesPerStep beats sig
+  | not (hasCents sig) = pure (scaled octavesPerStep (contour 0 beats sig))
+  | otherwise = case sig of
+      Cents a | not (hasCents a) -> pure (scaled (1/1200) (contour 0 beats a))
+      a :+: b -> (A.:+.) <$> lower a <*> lower b
+      a :*: b | not (hasCents a) -> (contour 0 beats a A.:*.) <$> lower b
+              | not (hasCents b) -> (A.:*. contour 0 beats b) <$> lower a
+      Start a -> (\c -> A.Flat (A.contourAt c 0)) <$> lower a
+      -- Preserve the existing step-based arithmetic for products/nesting of
+      -- cents. Their reciprocal step size is undefined at ratio 1.
+      _ | octavesPerStep == 0 -> Left "products or nesting of cents require a tuning ratio other than 1"
+        | otherwise -> pure (scaled octavesPerStep (contour (1 / (1200 * octavesPerStep)) beats sig))
+  where
+    lower = pitchContour octavesPerStep beats
+    scaled 0 _ = A.Flat 0
+    scaled 1 c = c
+    scaled k (A.Flat x) = A.Flat (k * x)
+    scaled k c = A.Flat k A.:*. c
+
+-- | Pull a musical contour through the shared clock. The engine receives
+-- only dimensionless coordinates; it still knows nothing about score beats.
+clockContour :: TimeMap -> Rational -> Rational -> A.Contour -> A.Contour
+clockContour _ _ _ c@(A.Flat _) = c
+clockContour clock start length' c
+  | all (\seg -> A.clockCurve seg == 0 && A.timeFrom seg == A.positionFrom seg
+               && A.timeTo seg == A.positionTo seg) segments = c
+  | otherwise = A.Warp segments c
+  where
+    end = start + length'
+    pieces = timePieces clock
+    boundaries = sort (nub (start : end : [b | (x,y,_) <- pieces, b <- [x,y], b > start, b < end]))
+    t0 = performed clock start
+    elapsed = performed clock end - t0
+    time b = (performed clock b - t0) / elapsed
+    position b = fromRational ((b - start) / length')
+    slope b = sum [k | (x,y,k) <- pieces, x <= b, b < y]
+    segments = [A.ClockSegment (time a) (time b) (position a) (position b)
+                  (slope a * fromRational (b-a)) | (a,b) <- zip boundaries (drop 1 boundaries)]
+
 -- | A signal as the engine's contour: oscillator rates become cycles over the
 -- note, and 'Cents' parts become steps.
 contour :: Double -> Double -> Signal -> A.Contour
-contour stepsPerCent beats sig = case sig of
+contour stepsPerCent beats sig
+  | Just k <- constantValue sig = A.Flat (fromRational k)
+  | otherwise = contourVarying stepsPerCent beats sig
+
+contourVarying :: Double -> Double -> Signal -> A.Contour
+contourVarying stepsPerCent beats sig = case sig of
   Const k -> A.Flat (fromRational k)
   Points ps -> A.Breaks [(fromRational u, fromRational y) | (u, y) <- ps]
   Osc w r -> A.Cycles (case w of Sine -> A.SineWave; Square -> A.SquareWave) (fromRational r * beats)

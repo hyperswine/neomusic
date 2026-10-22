@@ -108,7 +108,7 @@ scoreGroup = Group "NeoMusic score and views"
   , ("strict sheet/MIDI bounds and exact tick resolution", withTests 1 $ property $ do
       let micro = perf {instruments=M.singleton "right" defaultInstrument {tuning=A.Tuning 440 (2 ** (1/24))}}
           note = Line "right" (n 0)
-      let percussion = perf {instruments=M.singleton "right" defaultInstrument {timbre=A.Classic A.kick}}
+      let percussion = perf {instruments=M.singleton "right" defaultInstrument {timbre=A.Classic A.kick, pitchIdentity=Unpitched}}
       assert (isLeft (midi percussion note))
       assert (isLeft (engrave percussion view note))
       assert (isLeft (midi micro note))
@@ -153,13 +153,67 @@ scoreGroup = Group "NeoMusic score and views"
       microPage <- evalEither (numericPage plain (performance micro) (score micro))
       assert ("m: 24-EDO, 0 = 440.0 Hz" `isInfixOf` microPage && not ("keys:" `isInfixOf` microPage))
       assert (isLeft (numericPage plain perf (Line "nobody" (n 0)))))
+  , ("held expression bounds use only the held value", withTests 1 $ property $ do
+      let held = Start (Points [(0, 1/2), (1, -1)])
+      signalBounds held === (1/2, 1/2)
+      d <- evalEither (parseDocument (header ++ "right: level (start (0.5 -> -1)) [0]"))
+      timeline <- evalEither (render (performance d) (score d))
+      map (\v -> A.contourAt (A.loudness v) 1) (A.notes timeline) === [0.5]
+      _ <- evalEither (A.renderTimelineMix (A.defaultMix 8000) timeline)
+      _ <- evalEither (midi (performance d) (score d))
+      assert (isLeft (parseDocument (header ++ "right: level (start (-1 -> 1)) [0]")))
+      -- Oscillators at the onset have an exact value too.
+      constantValue (Start (Osc Sine 3)) === Just 0
+      constantValue (Start (Osc Square 3)) === Just 1
+      signalBounds (Start (Const 1 :+: Osc Sine 3)) === (1, 1))
+  , ("MIDI validates the effective conductor tempo", withTests 1 $ property $ do
+      let slow = perf {bpm = 1}
+          music = Line "right" (n 0)
+          conducted = Tempo (steady 120) music
+      tempoChanges slow conducted === Right [(0, 500000)]
+      actual <- evalEither (midi slow conducted)
+      expected <- evalEither (midi perf music)
+      actual === expected
+      -- An uncovered span still needs the base tempo, including trailing silence.
+      assert (isLeft (midi slow (conducted :>>: Silence 1)))
+      assert (isLeft (midi slow music))
+      assert (isLeft (midi slow (Silence 0))))
+  , ("unit-ratio tuning keeps cents independent of steps", withTests 1 $ property $ do
+      let p = perf {instruments = M.singleton "right" defaultInstrument {tuning = A.Tuning 220 1}}
+          ramp = Points [(0,0),(1,100)]
+          contourOf sig = do
+            t <- evalEither (render p (Line "right" (addPitch sig (n 7))))
+            _ <- evalEither (A.renderTimelineMix (A.defaultMix 8000) t)
+            pure (A.pitchMod (head (A.notes t)))
+      ignored <- contourOf (Points [(0,0),(1,12)])
+      map (A.contourAt ignored) [0, 0.5, 1] === [0,0,0]
+      mapM_ (\sig -> do
+        c <- contourOf sig
+        assert (abs (A.contourAt c 0.5 - 1/24) < 1e-12))
+        [Cents ramp, Const (1/2) :*: Cents (Const 2 :*: ramp)
+        , Cents ramp :+: Points [(0,0),(1,12)]]
+      held <- contourOf (Start (Cents (Points [(0,50),(1,100)])))
+      assert (abs (A.contourAt held 1 - 1/24) < 1e-12)
+      -- Mixed step/cents arithmetic also keeps its meaning in ordinary,
+      -- microtonal and descending tunings.
+      mapM_ (\r -> do
+        let tuned = p {instruments = M.singleton "right" defaultInstrument {tuning = A.Tuning 220 r}}
+            shape = Points [(0,1),(1,2)] :*: (Points [(0,0),(1,12)] :+: Cents ramp)
+        t <- evalEither (render tuned (Line "right" (addPitch shape (n 0))))
+        let c = A.pitchMod (head (A.notes t))
+        assert (and [abs (A.contourAt c u - (1+u)*u*(12*logBase 2 r + 1/12)) < 1e-10
+                    | u <- [0,0.25,0.5,0.75,1]])) [1, 2**(1/12), 2**(1/24), 2**(-1/12)]
+      -- Products of two cents-valued terms have no finite step conversion here.
+      assert (isLeft (render p (Line "right" (addPitch (Cents ramp :*: Cents ramp) (n 0))))))
   , ("level scales, so nested levels compose", property $ do
       a <- forAll (Gen.double (Range.linearFrac 0 1))
       b <- forAll (Gen.double (Range.linearFrac 0 1))
       let phrase = hit [0] 1 0.8 <> hit [4] 1 0.4
           by x = scaleLevel (Const (toRational x))
           close x y = abs (x - y) < 1e-12
-      assert (and (zipWith close (map vel (by a (by b phrase))) (map vel (by (a*b) phrase))))
+      let amplitude e = valueAt 0 1 0 (level e)
+      assert (and (zipWith close (map amplitude (by a (by b phrase))) (map amplitude (by (a*b) phrase))))
+      map strength (by a phrase) === map strength phrase
       doc <- evalEither (parseDocument (header++"right: vel 0.5 [0 vel 0.6 [4] 7]\n"))
       (_,es) <- evalEither (flatten (score doc))
       map (vel . event) es === [0.5, 0.3, 0.5])
@@ -280,7 +334,9 @@ scoreGroup = Group "NeoMusic score and views"
       ds <- forAll (Gen.list (Range.singleton (length xs)) (Gen.element [1/4, 1/2, 3/4, 1, 2]))
       g <- forAll (Gen.element [1/2, 1, 3/2])
       shape <- forAll (Gen.element [steady (2/3), Ramp 1 (1/2), Ramp (1/2) (3/2), swung 1 (2/3), Cycle [(1, Ramp 1 (1/2)), (1/2, steady 2)]])
-      let line = Line "right" (withGate g (concat (zipWith (\x d -> hit [x] d 1) xs ds)))
+      -- Lagged notes (humanizing) must be stepped where they actually sound.
+      late <- forAll (Gen.element [0, 1/8, 1/3, -1/16])
+      let line = Line "right" (addLag late (withGate g (concat (zipWith (\x d -> hit [x] d 1) xs ds))))
           music = Line "right" (n 0) :>>: Tempo shape line :>>: Line "right" (n 7)
       changes <- evalEither (tempoChanges perf music)
       timeline <- evalEither (render perf music)
@@ -289,8 +345,8 @@ scoreGroup = Group "NeoMusic score and views"
       let played b = sum [ fromInteger us * fromRational (min b x1 - x0) / 1e6
                          | ((x0, us), x1) <- zip changes (map fst (drop 1 changes) ++ [b]), x0 < b ]
           pitched = [e | e <- es, not (null (pitches (event e)))]
-      assert (and [ abs (played (onset e) - A.start v) < 1e-6
-                    && abs (played (onset e + dur (event e) * gate (event e)) - (A.start v + A.duration v)) < 1e-6
+      assert (and [ abs (played (onset e + lag (event e)) - A.start v) < 1e-6
+                    && abs (played (onset e + lag (event e) + dur (event e) * gate (event e)) - (A.start v + A.duration v)) < 1e-6
                   | (e, v) <- zip pitched (A.notes timeline) ]))
   , ("tempo in the language, staff and numeric views", withTests 1 $ property $ do
       doc <- evalEither (parseDocument (header++"right: 0 speed 1 -> 3/4 [2 4] swing 2/3 [5:1/2 7:1/2] hold 2 [9] 0\n"))
@@ -328,7 +384,7 @@ scoreGroup = Group "NeoMusic score and views"
       quiet <- evalEither (render perf (Line "right" (swellBy [(0, 1/2), (1, 1/2)] (swellBy [(0, 1), (1, 1/2)] (n 0)))))
       [near (A.contourAt (A.loudness v) 1) (1/4) && near (A.contourAt (A.loudness v) 0) (1/2) | v <- A.notes quiet] === [True]
       -- Constant parts stay note properties: strength, and frequency.
-      strong <- evalEither (render perf (Line "right" (scaleLevel (Const (1/2)) (addPitch (Const 12) (n 0)))))
+      strong <- evalEither (render perf (Line "right" (scaleStrength (Const (1/2)) (addPitch (Const 12) (n 0)))))
       octaveUp <- evalEither (render perf (Line "right" (n 12)))
       [(A.velocity v, A.pitchMod v, A.loudness v) | v <- A.notes strong] === [(0.5, A.Flat 0, A.Flat 1)]
       assert (and [near (A.hz u) (A.hz v) | (u, v) <- zip (A.notes strong) (A.notes octaveUp)])
@@ -412,8 +468,24 @@ scoreGroup = Group "NeoMusic score and views"
       -- strength is velocity, not expression.
       shared <- evalEither (midi perf (Line "right" (bendBy [(0, 0), (1, 1)] (n 0)) :||: Line "right" (n 4)))
       BL.take 2 (BL.drop 10 shared) === BL.pack [0,3]
-      softer <- evalEither (midi perf (Line "right" (scaleLevel (Const (1/2)) (n 0)) :||: Line "right" (n 4)))
+      softer <- evalEither (midi perf (Line "right" (scaleStrength (Const (1/2)) (n 0)) :||: Line "right" (n 4)))
       BL.take 2 (BL.drop 10 softer) === BL.pack [0,2]
+      -- A chord's tones share their curves, so they share one channel: even
+      -- sixteen tones under one expression fit (conductor + one track).
+      wide <- evalEither (midi perf (Line "right" (scaleLevel (Const (1/2)) (hit [0 .. 15] 2 1))))
+      BL.take 2 (BL.drop 10 wide) === BL.pack [0,2]
+      swelled <- evalEither (midi perf (Line "right" (swellBy [(0,1/4),(1,1)] (hit [0, 4, 7] 2 1))))
+      BL.take 2 (BL.drop 10 swelled) === BL.pack [0,2]
+      -- Each curve is emitted once per channel, not once per tone.
+      let expressions b = length [() | i <- [0 .. BS.length b - 3], BS.index b i == 0xb0, BS.index b (i+1) == 11]
+      -- Retrograde plays each note's own curves backwards too, and is still
+      -- its own inverse.
+      let bent = bendBy [(0,0),(1/4,1),(1,2)] (n 0)
+      map pitchShift (retro bent) === [Points [(0,2),(3/4,1),(1,0)]]
+      map level (retro (swellBy [(0,1/4),(1,1)] (n 0 <> n 2))) === replicate 2 (Points [(0,1),(1,1/4)])
+      retro (retro bent) === bent
+      swellOne <- evalEither (midi perf (Line "right" (swellBy [(0,1/4),(1,1)] (hit [0] 2 1))))
+      expressions (BL.toStrict swelled) === expressions (BL.toStrict swellOne)
       sheet <- evalEither (engrave perf view (Line "right" (bendBy [(0,0),(1,4)] (n 0) <> n 4 <> vibratoBy (1/4) (n 7) <> swellBy [(0,1),(1,1/2)] (n 9))))
       assert (all (`isInfixOf` sheet) ["c'4\\glissando e'4", "g'4^\\markup \\italic \"vib.\"", "a'4_\\markup \\italic \"dim.\""])
       numeric marked (Line "right" (bendBy [(0,0),(1,1)] (n 0) <> vibratoBy (1/4) (n 2) <> swellBy [(0,1),(1,0)] (n 4) <> bendBy [(0,0),(1/2,1),(1,0)] (n 5)))
@@ -490,7 +562,13 @@ scoreGroup = Group "NeoMusic score and views"
         , "f x = vel x [0]\nright: f [0]"                -- music used as a number
         , "f x = vel y [x]\nright: f [0]"                -- unknown number
         , "f #k #k x = x\nright: f 1 1 [0]"             -- duplicate parameter
-        , "f #speed x = x\nright: f 1 [0]" ])           -- reserved word
+        , "f #speed x = x\nright: f 1 [0]"              -- reserved word
+        , "strength #v x = [x x]\nright: strength 1/2 [0]"   -- a keyword can't be redefined
+        , "dynamics x = x\nright: dynamics [0]"
+        , "f #cents x = pitch cents [x]\nright: f 1 [0]" ]   -- nor be a parameter
+      -- A binding may still be named like a signal word that only takes a number.
+      redefined <- events "cents #c x = up 1 [x]\nright: cents 50 [0]"
+      map (pitches . event) redefined === [[A.Step 1]])
   , ("the prelude: ordinary definitions a score can shadow", withTests 1 $ property $ do
       let events src = do
             doc <- evalEither (parseDocument (header ++ src))
@@ -605,7 +683,16 @@ scoreGroup = Group "NeoMusic score and views"
         , "sound a\nsound a\nright: 0"
         , "instrument x = nothing\nright: 0"
         , "reverb wet -1", "reverb hall loud 1", "master peak 2", "master rate 4000"
-        , "master normalize maybe", "reverb hall\nreverb none" ])
+        , "master normalize maybe", "reverb hall\nreverb none" ]
+      -- Header and attribute numbers are the music's exact numbers, and an
+      -- error names the line it is on.
+      exact <- evalEither (parseDocument "tempo 180/2\ninstrument right = sine gain 1/2 pan -1/4\nmaster peak 9/10\nright: 0\n")
+      bpm (performance exact) === 90
+      fmap (\i -> (gain i, pan i)) (M.lookup "right" (instruments (performance exact))) === Just (0.5, -0.25)
+      A.mixPeak (mix (performance exact)) === 0.9
+      reverbed <- evalEither (parseDocument "instrument right = sine\nreverb hall wet 1/2 predelay 1/50\nmaster tail 3/2\nright: 0\n")
+      (A.wet (A.mixReverb (mix (performance reverbed))), A.preDelay (A.mixReverb (mix (performance reverbed))), A.mixTail (mix (performance reverbed))) === (0.5, 0.02, 1.5)
+      assert (either ("line 2" `isInfixOf`) (const False) (parseDocument "tempo 90\ninstrument right = sine gain loud\nright: 0\n")))
   , ("voices in .neomusic", withTests 1 $ property $ do
       -- A voice expression builds exactly the Voice that Haskell would, and may
       -- name other sounds, presets included, in any order.
@@ -647,7 +734,7 @@ scoreGroup = Group "NeoMusic score and views"
         , "sound a = tone saw +\nright: 0" ]
       -- The last parses, but a noise voice is unpitched, so it has no MIDI note.
       drums <- evalEither (parseDocument (unlines
-        [ "tempo 120", "tuning 12 at C4", "sound a = noise", "instrument drums = a", "drums: 0" ]))
+        [ "tempo 120", "tuning 12 at C4", "sound a = noise", "instrument drums = a pitch unpitched", "drums: 0" ]))
       assert (isLeft (midi (performance drums) (score drums))))
   , ("recordings in .neomusic", withTests 1 $ property $ do
       -- A document names its recordings; loadDocument finds them next to it
@@ -762,8 +849,8 @@ scoreGroup = Group "NeoMusic score and views"
       -- A crescendo: each note's start is its strength; the rest rises within it.
       (_, rising) <- events "cresc 0.2 1 [0 2 4 5]"
       map vel rising === [0.2, 0.4, 0.6, 0.8]
-      map level rising === [Const (2/10) :*: Points [(0, 1), (1, 2)], Const (4/10) :*: Points [(0, 1), (1, 3/2)]
-                           , Const (6/10) :*: Points [(0, 1), (1, 4/3)], Const (8/10) :*: Points [(0, 1), (1, 5/4)]]
+      map level rising === [Points [(0, 1), (1, 2)], Points [(0, 1), (1, 3/2)]
+                           , Points [(0, 1), (1, 4/3)], Points [(0, 1), (1, 5/4)]]
       map swellMotion rising === replicate 4 Rising
       -- Breakpoints restrict exactly; a constant span folds to a constant.
       (_, held) <- events "level across {0:1 1/4:1/2 3/4:1/2 1:1} [0:4]"
@@ -773,8 +860,11 @@ scoreGroup = Group "NeoMusic score and views"
       -- Pitch adds across the group; a detached note only gets its sounding span.
       (_, drift) <- events "pitch across 0 -> -1 [0 0]"
       map pitchShift drift === [Points [(0, 0), (1, -1/2)], Points [(0, -1/2), (1, -1)]]
+      -- From silence, the first note's attack is its own peak (1/4) and its
+      -- expression rises to it, so strength times expression is unchanged.
       (_, short) <- events "cresc 0 1 [staccato [0 0]]"
-      map level short === [Points [(0, 0), (1, 1/4)], Const (1/2) :*: Points [(0, 1), (1, 3/2)]]
+      map vel short === [1/4, 1/2]
+      map level short === [Points [(0, 0), (1, 1)], Points [(0, 1), (1, 3/2)]]
       -- Nesting multiplies; oscillators can't span a phrase.
       (_, nested) <- events "vel 0.5 [cresc 0.5 1 [0 0]]"
       map vel nested === [0.25, 0.375]
@@ -792,6 +882,145 @@ scoreGroup = Group "NeoMusic score and views"
       (_, ys) <- evalEither (flatten (score again))
       sort [(onset e, show (level (event e))) | e <- ys, not (null (pitches (event e)))]
         === sort [(onset e, show (level (event e))) | e <- xs])
+  , ("strength and expression are independent of signal spelling", withTests 1 $ property $ do
+      let document body = evalEither (parseDocument (header ++ "right: " ++ body ++ "\n"))
+          timeline d = evalEither (render (performance d) (score d))
+          mix0 = (A.defaultMix 8000) {A.mixNormalize = False, A.mixReverb = A.noReverb, A.mixTail = 0}
+          equivalent a b = do
+            da <- document a
+            db <- document b
+            ta <- timeline da
+            tb <- timeline db
+            map A.velocity (A.notes ta) === map A.velocity (A.notes tb)
+            (la, ra) <- evalEither (A.renderTimelineMix mix0 ta)
+            (lb, rb) <- evalEither (A.renderTimelineMix mix0 tb)
+            VU.length la === VU.length lb
+            assert (VU.maximum (VU.cons 0 (VU.map abs (VU.zipWith (-) la lb))) < 1e-10)
+            assert (VU.maximum (VU.cons 0 (VU.map abs (VU.zipWith (-) ra rb))) < 1e-10)
+      equivalent "level 0.5 [0]" "level (0.5 -> 0.5) [0]"
+      equivalent "level (0.5 * (1 + 0.2 * sine 3)) [0]" "level (0.5 + 0.1 * sine 3) [0]"
+      equivalent "level across (0.2 -> 1) [0 2 4 5]" "level across (0.2 + 0.8 * (0 -> 1)) [0 2 4 5]"
+      equivalent "dynamics across (0.2 -> 1) [0 2 4 5]" "dynamics across (0.2 + 0.8 * (0 -> 1)) [0 2 4 5]"
+      d <- document "vel 0.5 [level 0.25 [0]]"
+      t <- timeline d
+      map A.velocity (A.notes t) === [0.5]
+      map (\v -> A.contourAt (A.loudness v) 0) (A.notes t) === [0.25]
+      -- A crescendo beginning at zero still fades in; zero strength stays silent.
+      equivalent "cresc 0 1 [0:2]" "level across (0 -> 1) [0:2]"
+      -- ...and its attacks rise: the first note's strength is its own peak,
+      -- not a neutral 1 louder than everything after it.
+      rising <- document "cresc 0 1 [0 0 0 0]" >>= timeline
+      map A.velocity (A.notes rising) === [0.25, 0.25, 0.5, 0.75]
+      muted <- document "vel 0 [cresc 0 1 [0:2]]" >>= timeline
+      map A.velocity (A.notes muted) === [0]
+      (silence, _) <- evalEither (A.renderTimelineMix mix0 muted)
+      assert (VU.all (== 0) silence)
+      encoded <- evalEither (prettyScore (score d))
+      back <- evalEither (parseDocument (header ++ encoded))
+      roundtrip <- timeline back
+      roundtrip === t
+      assert (isLeft (parseDocument (header ++ "right: strength 2 [0]\n"))))
+  , ("musical signals follow the clock within notes", withTests 1 $ property $ do
+      let shapes = [Ramp 1 (1/2), Ramp (1/2) 2, swung 1 (2/3), Cycle [(1/2, steady 2), (1/2, Ramp 1 (1/2))]]
+          ramp = Points [(0,0),(1,2)]
+          near a b = abs (a-b) < 1e-9
+          atBeat clock v b c = A.contourAt c ((performed clock b * 0.5 - A.start v) / A.duration v)
+      mapM_ (\shape -> do
+        held <- evalEither (pitchAcross ramp (Line "right" (hit [0] 2 1)) >>= levelAcross ramp)
+        split <- evalEither (pitchAcross ramp (Line "right" (n 0 <> n 0)) >>= levelAcross ramp)
+        let wholeScore = Tempo shape held
+            clock = timeMap wholeScore
+        a <- evalEither (render perf wholeScore)
+        b <- evalEither (render perf (Tempo shape split))
+        case (A.notes a, A.notes b) of
+          ([one], [first,second]) -> mapM_ (\beat -> do
+            let v = if beat < 1 then first else second
+                expected = fromRational beat
+            assert (near (12 * atBeat clock one beat (A.pitchMod one)) expected)
+            assert (near (12 * atBeat clock v beat (A.pitchMod v)) expected)
+            assert (near (atBeat clock one beat (A.loudness one)) expected)
+            assert (near (atBeat clock v beat (A.loudness v)) expected)) [1/4,3/4,1,5/4,7/4]
+          _ -> failure
+        _ <- evalEither (A.renderTimelineMix ((A.defaultMix 8000) {A.mixTail=0}) a)
+        pure ()) shapes
+      -- A gated oscillator keeps cycles per written beat even across tempo boundaries.
+      let music = Tempo (Ramp 1 (1/2)) (Line "right" (withGate (3/2) (addPitch (Osc Sine 1) (hit [0] 2 1))))
+          clock = timeMap music
+      t <- evalEither (render perf music)
+      case A.notes t of
+        [v] -> mapM_ (\beat -> assert (near (12 * atBeat clock v beat (A.pitchMod v)) (sin (2*pi*fromRational beat)))) [1/4,3/4,5/4,7/4,9/4,11/4]
+        _ -> failure
+      -- MIDI note/controller tracks remain written-beat data; only its conductor changes.
+      let line = Line "right" (addPitch (Points [(0,0),(1,2)]) (scaleLevel (Points [(0,1/2),(1,1)]) (hit [0] 2 1)))
+          tracks bytes | BL.null bytes = []
+                       | otherwise = let count = BL.foldl' (\x y -> x*256 + fromIntegral y) 0 (BL.take 4 (BL.drop 4 bytes))
+                                     in BL.take count (BL.drop 8 bytes) : tracks (BL.drop (8+count) bytes)
+      straight <- evalEither (midi perf line)
+      warped <- evalEither (midi perf (Tempo (Ramp 1 (1/2)) line))
+      drop 1 (tracks (BL.drop 14 straight)) === drop 1 (tracks (BL.drop 14 warped)))
+  , ("pitch identity is explicit and independent of the voice graph", withTests 1 $ property $ do
+      let voices = [A.Tone A.SineWave, A.Bend (A.K 12) (A.Tone A.SineWave), A.Noise]
+          note = Line "right" (n 0)
+          performanceFor identity voice = perf {instruments=M.singleton "right" defaultInstrument {timbre=voice,pitchIdentity=identity}}
+      mapM_ (\voice -> do
+        let pitched = performanceFor Pitched voice
+            unpitched = performanceFor Unpitched voice
+        _ <- evalEither (midi pitched note)
+        _ <- evalEither (engrave pitched view note)
+        assert (isLeft (midi unpitched note) && isLeft (engrave unpitched view note))) voices
+      d <- evalEither (parseDocument "sound oct = bend 12 tone sine\ninstrument a = oct pitch pitched\na: 0\n")
+      _ <- evalEither (midi (performance d) (score d))
+      u <- evalEither (parseDocument "instrument a = sine pitch unpitched\na: 0\n")
+      assert (isLeft (midi (performance u) (score u)))
+      assert (isLeft (parseDocument "instrument a = sine pitch maybe\na: 0\n")))
+  , ("one conductor owns the ensemble clock", withTests 1 $ property $ do
+      let headers = header ++ "instrument left = piano staff bass\n"
+          voices = "right: 0\nleft: 4\n"
+          compile source = evalEither (parseDocument source)
+      d <- compile (headers ++ "conductor: speed 2 [_]\n" ++ voices)
+      t <- evalEither (render (performance d) (score d))
+      A.seconds t === 0.25
+      length (A.notes t) === 2
+      (_, es) <- evalEither (flatten (score d))
+      assert (all ((/= "conductor") . instrument) es)
+      mapM_ (assert . isLeft . parseDocument)
+        [ headers ++ "right: speed 2 [0]\nleft: speed 2 [4]\n"
+        , headers ++ "conductor: speed 2 [_]\nright: speed 2 [0]\nleft: 4\n"
+        , headers ++ "conductor: 0\n" ++ voices
+        , headers ++ "conductor: _\nconductor: _\n" ++ voices
+        , "instrument conductor = sine\nconductor: _\n"
+        , header ++ "right: speed 2 [0] & speed 2 [4]\n" ]
+      assert (isLeft (flatten (Tempo (steady 2) (Line "right" (n 0)) :||: Tempo (steady 2) (Line "right" (n 4)))))
+      -- Explicit nesting is intentional multiplication, and both views show it.
+      nested <- compile (headers ++ "conductor: speed 2 [speed 2 [_]]\n" ++ voices)
+      nt <- evalEither (render (performance nested) (score nested))
+      A.seconds nt === 0.125
+      page <- evalEither (numeric plain (score nested))
+      assert ("speed 4" `isInfixOf` page && not ("speed 2" `isInfixOf` page))
+      staff <- evalEither (engrave (performance nested) (sheetView nested) (score nested))
+      assert ("4 = 480" `isInfixOf` staff)
+      -- Factors whose float product isn't exact still engrave exactly.
+      thirds <- compile (headers ++ "conductor: speed 2 [speed 3/2 [_]]\n" ++ voices)
+      staff3 <- evalEither (engrave (performance thirds) (sheetView thirds) (score thirds))
+      assert ("4 = 360" `isInfixOf` staff3 && not (".99" `isInfixOf` staff3))
+      encoded <- evalEither (prettyScore (score nested))
+      assert ("conductor:" `isInfixOf` encoded)
+      back <- compile (headers ++ encoded)
+      bt <- evalEither (render (performance back) (score back))
+      nt === bt
+      restored <- compile (header ++ "conductor: speed 2 [_ speed 2 [_] _]\nright: 0 2 4\n")
+      restoredPage <- evalEither (numeric plain (score restored))
+      assert ("speed 2 speed 4 speed 2" `isInfixOf` restoredPage)
+      -- Haskell callers can migrate a whole score without changing its clock.
+      let original = Tempo (Ramp 1 (1/2)) (Line "right" (n 0 <> n 2))
+      migrated <- evalEither (arrange (conductorOf original) [withoutTempo original])
+      render perf migrated === render perf original
+      -- The whole-score transforms are core API, including conductor tempo.
+      scaled <- evalEither (render perf (scaleScore 2 migrated))
+      assert (abs (A.seconds scaled - 2 * A.seconds (either (error "render") id (render perf migrated))) < 1e-9)
+      reversed <- evalEither (render perf (reverseScore (reverseScore migrated)))
+      expected <- evalEither (render perf migrated)
+      sort (map show (A.notes reversed)) === sort (map show (A.notes expected)))
   , ("LilyPond golden views", withTests 1 $ property $ do
       mapM_ (\name -> do
         source <- evalIO (readFile ("examples/neomusic/"++name++".neomusic"))

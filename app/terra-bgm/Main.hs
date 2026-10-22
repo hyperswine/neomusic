@@ -151,13 +151,19 @@ performance = Performance 144 (M.fromList
  , inst "bell" bell 0.12 0.3 0.3
  , inst "pad" pad 0.085 0 0.28
  , inst "bass" bass 0.31 0 0
- , inst "kick" kick 0.65 0 0
- , inst "snare" snare 0.19 0 0.1
- , inst "hat" hat 0.095 0.2 0
- , inst "cymbal" cymbal 0.12 (-0.35) 0.22
+ , drum "kick" kick 0.65 0 0
+ , drum "snare" snare 0.19 0 0.1
+ , drum "hat" hat 0.095 0.2 0
+ , drum "cymbal" cymbal 0.12 (-0.35) 0.22
  , inst "bridgeKeys" piano 0.19 (-0.1) 0.3 ])
  (Mix 44100 (hall { roomSize=0.67, wet=0.23 }) 0.35 0.86 1.2 True Nothing 16)
- where inst name patch g p s = (name, defaultInstrument {S.tuning = tune, S.timbre = Classic patch, S.gain = g, S.pan = p, S.send = s})
+ where
+  inst name patch g p s = (name, defaultInstrument
+    {S.tuning = tune, S.timbre = Classic patch, S.gain = g, S.pan = p, S.send = s})
+  drum name patch g p s =
+    let (label, instrument) = inst name patch g p s
+    in (label, instrument {S.pitchIdentity = S.Unpitched})
+
 
 check :: IO ()
 check = do
