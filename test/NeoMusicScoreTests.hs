@@ -983,14 +983,39 @@ scoreGroup = Group "NeoMusic score and views"
       length (A.notes t) === 2
       (_, es) <- evalEither (flatten (score d))
       assert (all ((/= "conductor") . instrument) es)
+      -- One rule: no two parts set the tempo over the same beats. The error
+      -- names the parts and the beats.
       mapM_ (assert . isLeft . parseDocument)
         [ headers ++ "right: speed 2 [0]\nleft: speed 2 [4]\n"
         , headers ++ "conductor: speed 2 [_]\nright: speed 2 [0]\nleft: 4\n"
         , headers ++ "conductor: 0\n" ++ voices
-        , headers ++ "conductor: _\nconductor: _\n" ++ voices
         , "instrument conductor = sine\nconductor: _\n"
         , header ++ "right: speed 2 [0] & speed 2 [4]\n" ]
+      parseDocument (headers ++ "right: 0 rit 1/2 [2 4]\nleft: speed 2 [_ 4 4]\n")
+        === Left "right and left both set the tempo over beats 1-3; keep it in one of them, or in a conductor: track"
       assert (isLeft (flatten (Tempo (steady 2) (Line "right" (n 0)) :||: Tempo (steady 2) (Line "right" (n 4)))))
+      -- Tempo written in a part is hoisted into the shared clock, so it plays
+      -- exactly as the same tempo in a conductor, with any number of parts.
+      inline <- compile (headers ++ "right: 0 rit 1/2 [2 4]\nleft: 4 4 4\n")
+      conducted <- compile (headers ++ "conductor: _ rit 1/2 [_:2]\nright: 0 2 4\nleft: 4 4 4\n")
+      ti <- evalEither (render (performance inline) (score inline))
+      tc <- evalEither (render (performance conducted) (score conducted))
+      sort (map show (A.notes ti)) === sort (map show (A.notes tc))
+      A.seconds ti === A.seconds tc
+      numeric plain (score inline) === numeric plain (score conducted)
+      -- Parts may each own different spans, alongside a conductor; a steady
+      -- speed 1 owns nothing.
+      _ <- compile (headers ++ "conductor: _ hold 2 [_]\nright: speed 3/4 [0] 2\nleft: 4 4 rit 1/2 [4 4]\n")
+      _ <- compile (headers ++ "right: speed 1 [0 2]\nleft: speed 2 [4 4]\n")
+      _ <- compile (headers ++ "conductor: _\nconductor: _\n" ++ voices)
+      -- Hoisted, the score is one clock beside tempo-free music.
+      hoisted <- evalEither (ensemble [("right", Tempo (Ramp 1 (1/2)) (Line "right" (n 0 <> n 2))), ("left", Line "left" (n 4))])
+      case hoisted of
+        clock :||: music -> do
+          tempoNodes music === []
+          (_, clockEvents) <- evalEither (flatten clock)
+          assert (all (null . pitches . event) clockEvents)
+        _ -> failure
       -- Explicit nesting is intentional multiplication, and both views show it.
       nested <- compile (headers ++ "conductor: speed 2 [speed 2 [_]]\n" ++ voices)
       nt <- evalEither (render (performance nested) (score nested))
@@ -1011,10 +1036,13 @@ scoreGroup = Group "NeoMusic score and views"
       restored <- compile (header ++ "conductor: speed 2 [_ speed 2 [_] _]\nright: 0 2 4\n")
       restoredPage <- evalEither (numeric plain (score restored))
       assert ("speed 2 speed 4 speed 2" `isInfixOf` restoredPage)
-      -- Haskell callers can migrate a whole score without changing its clock.
+      -- Haskell callers can migrate a whole score without changing its clock,
+      -- or hand arrange a part that keeps its own tempo.
       let original = Tempo (Ramp 1 (1/2)) (Line "right" (n 0 <> n 2))
       migrated <- evalEither (arrange (conductorOf original) [withoutTempo original])
       render perf migrated === render perf original
+      kept <- evalEither (arrange (Silence 2) [original])
+      render perf kept === render perf original
       -- The whole-score transforms are core API, including conductor tempo.
       scaled <- evalEither (render perf (scaleScore 2 migrated))
       assert (abs (A.seconds scaled - 2 * A.seconds (either (error "render") id (render perf migrated))) < 1e-9)

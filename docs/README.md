@@ -41,3 +41,4 @@ Pages written before 2026-10-21 came from HaskPlayground, where they moved into 
 | 2026-10-14 | [NEOMUSIC-VOICE](2026-10-14-NEOMUSIC-VOICE.md) | voices as signal graphs: sources, shapers, mixing |
 | 2026-10-21 | [NEOMUSIC-COMPOSITION](2026-10-21-NEOMUSIC-COMPOSITION.md) | plan and implementation record: strength, clocks, conductor ownership and pitch identity |
 | 2026-10-21 | [NEOMUSIC-BUG-REVIEW](2026-10-21-NEOMUSIC-BUG-REVIEW.md) | follow-up fixes: held expression bounds, effective MIDI tempo and unit-ratio cents |
+| 2026-10-22 | [NEOMUSIC-TEMPO-HOISTING](2026-10-22-NEOMUSIC-TEMPO-HOISTING.md) | prototype: tempo hoisted from any part, one ownership rule instead of three |

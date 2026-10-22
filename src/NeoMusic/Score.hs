@@ -7,7 +7,7 @@ module NeoMusic.Score
   , addPitch, scaleStrength, strengthAcross, scaleLevel, levelAcross, dynamicsAcross, pitchAcross, addLag, lagAcross, glide, vel, pitchParts, bendMotion, swellMotion, vibrates
   , BeatEvent(..), n, chord, rest, hit, hush, transpose, invert, retro, stretch
   , withRhythm, withGate, scaleGate, staccato, pedal
-  , mapPhrases, scaleScore, reverseScore, arrange, conductorOf, withoutTempo, scoreLength, flatten, validate, render, writeAudio
+  , mapPhrases, scaleScore, reverseScore, ensemble, conductorTrack, arrange, conductorOf, withoutTempo, tempoClash, scoreLength, flatten, validate, render, writeAudio
   , defaultInstrument, defaultPerformance
   ) where
 
@@ -344,17 +344,52 @@ reverseScore (a :||: b) =
   in (Silence (total-da) :>>: reverseScore a) :||: (Silence (total-db) :>>: reverseScore b)
 
 
--- | Assemble one explicit conductor and independent musical parts. Conductor
--- material occupies written time but may not contain pitched events.
-arrange :: Score -> [Score] -> Either String Score
-arrange conductor parts = do
-  (_, es) <- flatten conductor
-  unless (all (null . pitches . event) es) (Left "a conductor track contains rests and tempo, not notes")
-  unless (all (null . tempoNodes) parts)
-    (Left "instrumental parts contain tempo; move it to the conductor track")
-  let result = conductorOf conductor :||: foldr (:||:) (Silence 0) parts
+-- | Independent named parts as one ensemble with one clock.
+--
+-- Tempo is global: a change acts on everything sounding during its beats, in
+-- every part. So any part may carry its own tempo; it is hoisted out of the
+-- part into a single clock (@clock :||: music@), keeping its written
+-- position, and so its effect, exactly. A conductor is just a part with no
+-- notes. The one rule is 'tempoClash': no two parts may set the tempo over the
+-- same written beats. Within one part, nested changes multiply as written.
+ensemble :: [(Name, Score)] -> Either String Score
+ensemble parts = do
+  let owners = [(name, nodes) | (name, p) <- parts, let nodes = tempoNodes p, not (null nodes)]
+  forM_ [(x, y) | (i, x) <- zip [0 :: Int ..] owners, y <- drop (i + 1) owners] $
+    \((n1, t1), (n2, t2)) -> case tempoClash t1 t2 of
+      Just (u, v) -> Left (n1 ++ " and " ++ n2 ++ " both set the tempo over beats " ++ beatText u ++ "-" ++ beatText v
+                           ++ "; keep it in one of them, or in a conductor: track")
+      Nothing -> pure ()
+  let music = foldr (:||:) (Silence 0) [withoutTempo p | (_, p) <- parts]
+      clock = foldr (:||:) (Silence 0) [conductorOf p | (_, p) <- parts, not (null (tempoNodes p))]
+      result = if null owners then music else clock :||: music
   _ <- flatten result
   pure result
+
+-- | A conductor: written time and tempo, no notes (its rests become silence,
+-- so it names no instrument).
+conductorTrack :: Score -> Either String Score
+conductorTrack conductor = do
+  (_, es) <- flatten conductor
+  unless (all (null . pitches . event) es) (Left "a conductor track contains rests and tempo, not notes")
+  pure (conductorOf conductor)
+
+-- | One conductor and independent parts ('ensemble' with the conductor as a
+-- part). Parts may keep their own tempo where the conductor sets none.
+arrange :: Score -> [Score] -> Either String Score
+arrange conductor parts = do
+  c <- conductorTrack conductor
+  ensemble (("conductor", c) : [("part " ++ show i, p) | (i, p) <- zip [1 :: Int ..] parts])
+
+-- | The first written span where both lists set a tempo other than 1: two
+-- owners of the same beats. (Nesting inside one owner is not a clash.)
+tempoClash :: [(Rational, Rational, Shape)] -> [(Rational, Rational, Shape)] -> Maybe (Rational, Rational)
+tempoClash xs ys = case [(max a b, min (a + da) (b + db)) | x@(a, da, _) <- xs, y@(b, db, _) <- ys, overlap x y] of
+  clash : _ -> Just clash
+  [] -> Nothing
+
+beatText :: Rational -> String
+beatText r = if denominator r == 1 then show (numerator r) else show (numerator r) ++ "/" ++ show (denominator r)
 
 -- | Keep written structure and tempo, replacing all events with silence.
 -- Useful for migrating an existing score to explicit conductor ownership.
@@ -398,8 +433,10 @@ flatten = go 0
       (db, nb) <- go (at+da) b
       pure (da+db, na++nb)
     go at (a :||: b) = do
-      unless (not (or [overlap x y | x <- tempoNodes a, y <- tempoNodes b]))
-        (Left "parallel branches own overlapping tempo; put the shared tempo around the ensemble or in one conductor track")
+      case tempoClash (tempoNodes a) (tempoNodes b) of
+        Just (u, v) -> Left ("parallel branches both set the tempo over beats " ++ beatText u ++ "-" ++ beatText v
+                             ++ "; put the shared tempo around them, or in one of them")
+        Nothing -> pure ()
       (da, na) <- go at a
       (db, nb) <- go at b
       pure (max da db, na++nb)
