@@ -24,7 +24,13 @@ extra-source-files:
     examples/neomusic/acoustic/*.py
     examples/neomusic/acoustic/*.json
     examples/neomusic/acoustic/README.md
+    examples/neomusic/samples.lock.json
+    scripts/*.py
     test/golden/neomusic/*.ly
+    test/golden/regression/*.neomusic
+    test/golden/regression/*.parse
+    test/golden/regression/*.audio
+    test/golden/regression/*.mid
     src/NeoMusic/prelude.neomusic
 
 source-repository head
@@ -56,6 +62,7 @@ library
   hs-source-dirs: src
   exposed-modules:
         NeoMusic.Audio
+      , NeoMusic.Cli
       , NeoMusic.Language
       , NeoMusic.Midi
       , NeoMusic.Numeric
@@ -73,34 +80,15 @@ executable neo-music
   build-depends: neomusic
   ghc-options: -O2
 
-executable screw-anime
-  import: warnings, deps
-  main-is: Main.hs
-  hs-source-dirs: app/screw-anime
-  build-depends: neomusic
-  ghc-options: -O2
-
-executable screw-bgm
-  import: warnings, deps
-  main-is: Main.hs
-  hs-source-dirs: app/screw-bgm
-  build-depends: neomusic
-  ghc-options: -O2
-
-executable terra-bgm
-  import: warnings, deps
-  main-is: Main.hs
-  hs-source-dirs: app/terra-bgm
-  build-depends: neomusic
-  ghc-options: -O2
-
 test-suite neomusic-test
   import: warnings, deps
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   hs-source-dirs: test
   other-modules:
-      NeoMusicScoreTests
+      CliTests
+    , GoldenTests
+    , NeoMusicScoreTests
     , NeoMusicTests
   build-depends: neomusic, hedgehog
   ghc-options: -threaded -rtsopts -with-rtsopts=-N

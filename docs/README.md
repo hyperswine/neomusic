@@ -7,7 +7,7 @@ are not reconciled with each other: a page says what was true or intended when
 it was written, and a later page may supersede it without the earlier one
 being rewritten. When two pages disagree, the later date wins.
 
-The repository [README](../README.md) and the [terra-bgm note](../app/terra-bgm/README.md) stay beside the code they describe.
+The repository [README](../README.md) and the [terra-bgm note](../pieces/terra-bgm/README.md) stay beside the code they describe.
 
 ## Adding a page
 

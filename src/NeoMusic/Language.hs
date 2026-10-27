@@ -17,7 +17,7 @@ import Data.Ratio ((%), numerator, denominator)
 import qualified NeoMusic.Audio as A
 import qualified NeoMusic.Pitch as A
 import NeoMusic.Prelude (preludeSource)
-import NeoMusic.Recording (Recording, SampleSet, findFile, readRecording, readSampleSet)
+import NeoMusic.Recording (Recording, SampleSet, findFile, missingRecording, readRecording, readSampleSet)
 import System.FilePath (takeDirectory)
 import NeoMusic.Score
 import Text.Parsec hiding (Line, label, token)
@@ -303,7 +303,7 @@ loadDocument dirs path = do
   case documentAssets input of
     Left e -> pure (Left e)
     Right (sets, roomFiles) -> do
-      let locate p = maybe (Left ("recording not found: " ++ p ++ " (searched next to the document and in NEOMUSIC_SAMPLES)")) Right
+      let locate p = maybe (Left (missingRecording p)) Right
                        <$> findFile (takeDirectory path) dirs p
       loadedSets <- mapM (\p -> locate p >>= either (pure . Left) (readSampleSet dirs) >>= pure . fmap ((,) p)) sets
       loadedRooms <- mapM (\p -> locate p >>= either (pure . Left) readRecording >>= pure . fmap ((,) p)) roomFiles
