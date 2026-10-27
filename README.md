@@ -11,6 +11,17 @@ The [composition update](docs/2026-10-21-NEOMUSIC-COMPOSITION.md) records the
 current strength/expression, conductor and pitch-identity contracts and migration.
 The design notes, oldest first, are indexed in [docs/README.md](docs/README.md).
 
+## Install with Homebrew
+
+```sh
+brew install hyperswine/neomusic/neo-music
+```
+
+The [tap](https://github.com/hyperswine/homebrew-neomusic) builds the latest
+release from source with `ghc@9.8` and `cabal-install`; no bottles are
+published, so it takes a few minutes. It depends on `ffmpeg`. Use `--HEAD` for
+`main`. The recorded-sample libraries are separate; see below.
+
 ## Build and run
 
 The project builds with cabal 3.10+ and GHC 9.8 (tested with 9.8.2 and
