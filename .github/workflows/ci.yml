@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.os }} / GHC ${{ matrix.ghc }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        ghc: ['9.8.4']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: latest
+
+      - name: Configure
+        run: cabal configure --enable-tests
+
+      - name: Plan
+        run: cabal build all --dry-run
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+          restore-keys: ${{ runner.os }}-ghc-${{ matrix.ghc }}-
+
+      - name: Build
+        run: cabal build all
+
+      - name: Test
+        run: cabal test --test-show-details=direct
+
+      - name: Check examples (no external samples needed)
+        run: |
+          for f in articulation cents composition curves forest numeric-preview \
+                   orchestral presets scale signals tempo ties twinkle voices; do
+            echo "== $f"
+            cabal run -v0 neo-music -- check "examples/neomusic/$f.neomusic"
+          done
+
+      - name: Render smoke test (ffmpeg path)
+        run: |
+          cabal run -v0 neo-music -- play examples/neomusic/twinkle.neomusic -o twinkle.flac
+          ffprobe -v error -show_entries stream=sample_rate,channels -of default=nw=1 twinkle.flac
