@@ -15,26 +15,29 @@ module NeoMusic.Audio
   , Note(..), Timeline(..), Contour(..), ClockSegment(..), note, contourAt, contourBounds
     -- * Mixing and export
   , Reverb(..), Mix(..), noReverb, hall, defaultMix, validMix
-  , renderTimelineMix, writeTimelineMix, pcmWav, pcmWavBits, exportAs
+  , renderTimelineMix, renderTimelinePremaster, writeTimelineMix, writeTimelineMixWith, writeTimelineMixEncoded
+  , pcmWav, pcmWavBits, pcmWavWith, pcmWavStream
+  , Dither (..), defaultDither, tpdfNoise, exportAs, exportAsWith, exportStream, exportStreamWith
+  , encoderArgs, audioExtensions
   ) where
 
-import Control.Monad (forM, forM_, unless, when)
+import Control.Monad (foldM, forM, forM_, unless, when)
 import Data.List (sortOn)
 import GHC.Float (expm1, log1p)
 import Control.Monad.ST (ST, runST)
 import Data.STRef (STRef, newSTRef, readSTRef, writeSTRef)
 import Data.Bits (shiftL, shiftR, xor)
-import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Builder
 import Data.Int (Int16)
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as MV
-import Data.Word (Word32)
+import Data.Word (Word32, Word64)
 import System.Directory (findExecutable)
 import System.FilePath (takeExtension)
-import System.IO (hClose)
+import System.IO (BufferMode (..), Handle, IOMode (..), hClose, hSetBinaryMode, hSetBuffering, withBinaryFile)
+import System.Exit (ExitCode (..))
 import System.IO.Temp (withSystemTempFile)
-import System.Process (callProcess)
+import System.Process (CreateProcess (std_in), StdStream (..), callProcess, createProcess, proc, waitForProcess)
 import Data.Bits ((.&.), (.|.), countTrailingZeros)
 import qualified Data.Map.Strict as M
 import NeoMusic.Recording (Recording (..), Region (..), SampleSet (..), chooseRegions, recordedPitch)
@@ -629,7 +632,15 @@ defaultMix rate = Mix rate noReverb 0 0.8 0 True Nothing 16
 -- Nyquist are rejected.
 -- | Synthesize a validated physical timeline, shared by legacy pieces and scores.
 renderTimelineMix :: Mix -> Timeline -> Either String (VU.Vector Double, VU.Vector Double)
-renderTimelineMix mix (Timeline total ns) = do
+renderTimelineMix mix timeline = do
+  (l, r, out) <- renderTimelinePremaster mix timeline
+  pure (VU.map out l, VU.map out r)
+
+-- | The mix before the master stage, and the master stage as a per-sample
+-- function: @'renderTimelineMix'@ is @'VU.map'@ of it over both channels.
+-- Export applies it while writing, so the mastered copy is never held.
+renderTimelinePremaster :: Mix -> Timeline -> Either String (VU.Vector Double, VU.Vector Double, Double -> Double)
+renderTimelinePremaster mix (Timeline total ns) = do
   unless (nonNegative total) (Left "timeline length must be finite and nonnegative")
   forM_ ns $ \v -> do
     unless (nonNegative (start v) && positive (duration v) && positive (hz v)
@@ -657,17 +668,21 @@ renderTimelineMix mix (Timeline total ns) = do
         right <- MV.replicate len 0
         sends <- MV.replicate len 0
         forM_ (zip3 [1 ..] takes ns) $ \(seed, k, v) -> renderNote fr seed k v left right sends
-        dryL <- VU.unsafeFreeze left
-        dryR <- VU.unsafeFreeze right
         sendBus <- VU.unsafeFreeze sends
-        let (wetL, wetR) = case mixRoom mix of
-              Nothing -> freeverb fr rv sendBus
-              Just room -> roomReverb fr room sendBus
-            reverbOn = wet rv > 0 || maybe False ((> 0) . roomWet) (mixRoom mix)
-            withWet dry w = if reverbOn then VU.zipWith (+) dry w else dry
-        pure (master mix (withWet dryL wetL) (withWet dryR wetR))
+        let reverbOn = wet rv > 0 || maybe False ((> 0) . roomWet) (mixRoom mix)
+        -- The wet signal is added into the dry buffers in place.
+        when reverbOn $ do
+          let (wetL, wetR) = case mixRoom mix of
+                Nothing -> freeverb fr rv sendBus
+                Just room -> roomReverb fr room sendBus
+          forM_ [0 .. len - 1] $ \i -> do
+            addTo left i (VU.unsafeIndex wetL i)
+            addTo right i (VU.unsafeIndex wetR i)
+        (,) <$> VU.unsafeFreeze left <*> VU.unsafeFreeze right
+  -- The master stage maps finite samples to finite samples, so checking its
+  -- input is the same as checking its output.
   when (VU.any (not . finite) outL || VU.any (not . finite) outR) (Left "synthesis produced a nonfinite sample")
-  pure (outL, outR)
+  pure (outL, outR, master mix outL outR)
 
 type Buffer s = MV.MVector s Double
 
@@ -1183,54 +1198,54 @@ highpassed g x ic1 ic2 =
 -- | Freeverb: eight parallel damped combs into four series allpasses per
 -- channel, the right channel's delays offset by 23 samples for width.
 freeverb :: Double -> Reverb -> VU.Vector Double -> (VU.Vector Double, VU.Vector Double)
-freeverb fr rv input =
-  ( VU.zipWith (\a b -> a * wet1 + b * wet2) outL outR
-  , VU.zipWith (\a b -> b * wet1 + a * wet2) outL outR )
+freeverb fr rv input = runST $ do
+  -- One pass over the input for both channels; each comb and allpass keeps
+  -- only its delay line. Same arithmetic, in the same order, as 'comb' and
+  -- 'allpass' applied to whole vectors.
+  let n = VU.length input
+      line size = (,,) size <$> MV.replicate size 0 <*> MV.replicate 1 (0 :: Int)
+      newChannel offset = (,)
+        <$> mapM (\c -> (,) <$> line (tuned (c + offset)) <*> MV.replicate 1 0)
+                 [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617]
+        <*> mapM (\a -> line (tuned (a + offset))) [556, 441, 341, 225]
+      advance (size, _, ix) idx = MV.unsafeWrite ix 0 (if idx + 1 == size then 0 else idx + 1)
+      stepComb x (l@(_, buf, ix), st) = do
+        idx <- MV.unsafeRead ix 0
+        store <- MV.unsafeRead st 0
+        y <- MV.unsafeRead buf idx
+        let store' = y * (1 - damp) + store * damp
+        MV.unsafeWrite buf idx (x + store' * feedback)
+        MV.unsafeWrite st 0 store'
+        advance l idx
+        pure y
+      stepAllpass x l@(_, buf, ix) = do
+        idx <- MV.unsafeRead ix 0
+        y <- MV.unsafeRead buf idx
+        MV.unsafeWrite buf idx (x + y * 0.5)
+        advance l idx
+        pure (y - x)
+      step (combs, alls) x = do
+        ys <- mapM (stepComb x) combs
+        foldM stepAllpass (foldr1 (+) ys) alls
+  left <- newChannel 0
+  right <- newChannel 23
+  wl <- MV.new n
+  wr <- MV.new n
+  forM_ [0 .. n - 1] $ \i -> do
+    let x = if i >= delaySamples then 0.015 * VU.unsafeIndex input (i - delaySamples) else 0
+    a <- step left x
+    b <- step right x
+    MV.unsafeWrite wl i (a * wet1 + b * wet2)
+    MV.unsafeWrite wr i (b * wet1 + a * wet2)
+  (,) <$> VU.unsafeFreeze wl <*> VU.unsafeFreeze wr
   where
     delaySamples = round (preDelay rv * fr) :: Int
-    fed = VU.generate (VU.length input) $ \i ->
-      if i >= delaySamples then 0.015 * VU.unsafeIndex input (i - delaySamples) else 0
     tuned :: Int -> Int
     tuned x = max 1 (round (fromIntegral x * fr / 44100))
     feedback = roomSize rv * 0.28 + 0.7
     damp = damping rv * 0.4
-    channel offset =
-      let combs = [comb feedback damp (tuned (c + offset)) fed
-                  | c <- [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617]]
-      in foldl (\acc a -> allpass (tuned (a + offset)) acc)
-               (foldr1 (VU.zipWith (+)) combs) [556, 441, 341, 225]
-    outL = channel 0
-    outR = channel 23
     wet1 = 3 * wet rv * (width rv / 2 + 0.5)
     wet2 = 3 * wet rv * ((1 - width rv) / 2)
-
-comb :: Double -> Double -> Int -> VU.Vector Double -> VU.Vector Double
-comb fb damp size xs = VU.create $ do
-  buf <- MV.replicate size 0
-  out <- MV.new (VU.length xs)
-  let go !i !idx !store
-        | i >= VU.length xs = pure out
-        | otherwise = do
-            y <- MV.unsafeRead buf idx
-            let store' = y * (1 - damp) + store * damp
-            MV.unsafeWrite buf idx (VU.unsafeIndex xs i + store' * fb)
-            MV.unsafeWrite out i y
-            go (i + 1) (if idx + 1 == size then 0 else idx + 1) store'
-  go 0 0 0
-
-allpass :: Int -> VU.Vector Double -> VU.Vector Double
-allpass size xs = VU.create $ do
-  buf <- MV.replicate size 0
-  out <- MV.new (VU.length xs)
-  let go !i !idx
-        | i >= VU.length xs = pure out
-        | otherwise = do
-            y <- MV.unsafeRead buf idx
-            let x = VU.unsafeIndex xs i
-            MV.unsafeWrite buf idx (x + y * 0.5)
-            MV.unsafeWrite out i (y - x)
-            go (i + 1) (if idx + 1 == size then 0 else idx + 1)
-  go 0 0
 
 -- | A recorded room: the send bus, delayed, convolved with the impulse
 -- response (resampled to the mix rate if needed, each channel at unit energy;
@@ -1340,11 +1355,11 @@ fft inverse re im = do
     MV.unsafeModify re (/ fromIntegral n) i
     MV.unsafeModify im (/ fromIntegral n) i
 
-master :: Mix -> VU.Vector Double -> VU.Vector Double -> (VU.Vector Double, VU.Vector Double)
+master :: Mix -> VU.Vector Double -> VU.Vector Double -> Double -> Double
 master mix l r
-  | not (mixNormalize mix) = (VU.map saturate l, VU.map saturate r)
-  | peakIn == 0 = (l, r)
-  | otherwise = (VU.map scaled l, VU.map scaled r)
+  | not (mixNormalize mix) = saturate
+  | peakIn == 0 = id
+  | otherwise = scaled
   where
     peakOf = VU.foldl' (\m x -> max m (abs x)) 0
     d = mixDrive mix
@@ -1358,47 +1373,146 @@ master mix l r
 pcmWav :: FilePath -> Int -> [VU.Vector Double] -> IO ()
 pcmWav = pcmWavBits 16
 
--- | Interleaved little-endian PCM WAV at 16 or 24 bits.
+-- | Interleaved little-endian PCM WAV at 16 or 24 bits, without dither.
 pcmWavBits :: Int -> FilePath -> Int -> [VU.Vector Double] -> IO ()
-pcmWavBits bits path rate channels = do
-  let chans = length channels
-      bytesPer = bits `div` 8
-      frames = if null channels then 0 else minimum (map VU.length channels)
-      size = toInteger frames * toInteger chans * toInteger bytesPer
+pcmWavBits = pcmWavWith NoDither
+
+-- | How samples are reduced to 16 bits. 24-bit export is never dithered.
+data Dither
+  = NoDither
+  | Tpdf Word64  -- ^ triangular (TPDF) dither of +/-1 LSB from a seeded
+                 -- generator, so the same seed gives byte-identical files
+  deriving (Eq, Show)
+
+-- | The dither used by 'writeTimelineMix': TPDF with a fixed seed.
+defaultDither :: Dither
+defaultDither = Tpdf 0x6e656f6d75736963
+
+-- | TPDF noise in (-1, 1) LSB for sample index @i@: the sum of two uniform
+-- values from a stateless SplitMix64 hash, so it is pure and reproducible.
+tpdfNoise :: Word64 -> Int -> Double
+tpdfNoise seed i = uniform (2 * fromIntegral i) + uniform (2 * fromIntegral i + 1) - 1
+  where
+    uniform k = fromIntegral (mix64 (seed + k * 0x9e3779b97f4a7c15) `shiftR` 11) / 9007199254740992
+    mix64 z0 = let z1 = (z0 `xor` (z0 `shiftR` 30)) * 0xbf58476d1ce4e5b9
+                   z2 = (z1 `xor` (z1 `shiftR` 27)) * 0x94d049bb133111eb
+               in z2 `xor` (z2 `shiftR` 31)
+
+-- | Interleaved little-endian PCM WAV at 16 or 24 bits; 16-bit samples get
+-- the given dither.
+pcmWavWith :: Dither -> Int -> FilePath -> Int -> [VU.Vector Double] -> IO ()
+pcmWavWith dither bits path rate channels = do
+  let frames = if null channels then 0 else minimum (map VU.length channels)
+      sampleAt c = VU.unsafeIndex (channels !! c)
+  checkWav bits (length channels) frames
+  withBinaryFile path WriteMode $ \h -> pcmWavStream dither bits rate (length channels) frames sampleAt h
+
+checkWav :: Int -> Int -> Int -> IO ()
+checkWav bits chans frames = do
   when (bits `notElem` [16, 24]) (ioError (userError "WAV export supports 16 or 24 bits"))
-  when (size > 4294967259) (ioError (userError "audio exceeds RIFF WAV size limit"))
-  let header = string8 "RIFF" <> word32LE (fromInteger (36 + size)) <> string8 "WAVEfmt "
+  when (toInteger frames * toInteger chans * toInteger (bits `div` 8) > 4294967259)
+    (ioError (userError "audio exceeds RIFF WAV size limit"))
+
+-- | Stream a WAV to a handle: @sampleAt channel frame@ gives each sample, so
+-- the encoded file is produced in chunks and never held whole. 16-bit
+-- samples get the given dither, indexed by interleaved sample number.
+pcmWavStream :: Dither -> Int -> Int -> Int -> Int -> (Int -> Int -> Double) -> Handle -> IO ()
+pcmWavStream dither bits rate chans frames sampleAt h = do
+  checkWav bits chans frames
+  let bytesPer = bits `div` 8
+      size = toInteger frames * toInteger chans * toInteger bytesPer
+      header = string8 "RIFF" <> word32LE (fromInteger (36 + size)) <> string8 "WAVEfmt "
         <> word32LE 16 <> word16LE 1 <> word16LE (fromIntegral chans) <> word32LE (fromIntegral rate)
         <> word32LE (fromIntegral (rate * chans * bytesPer)) <> word16LE (fromIntegral (chans * bytesPer))
         <> word16LE (fromIntegral bits) <> string8 "data" <> word32LE (fromInteger size)
       clamp x = max (-1) (min 1 x)
-      pcm x
-        | bits == 16 = int16LE (round (clamp x * 32767) :: Int16)
+      noise = case dither of
+        NoDither -> const 0
+        Tpdf seed -> tpdfNoise seed
+      pcm k x
+        | bits == 16 = int16LE (fromIntegral (max (-32767) (min 32767 (round (clamp x * 32767 + noise k) :: Int))) :: Int16)
         | otherwise = let v = round (clamp x * 8388607) :: Int
                           u = if v < 0 then v + 16777216 else v
                       in word8 (fromIntegral (u .&. 255)) <> word8 (fromIntegral ((u `shiftR` 8) .&. 255)) <> word8 (fromIntegral (u `shiftR` 16))
-      frame i = foldMap (\ch -> pcm (VU.unsafeIndex ch i)) channels
-  BL.writeFile path (toLazyByteString (header <> foldMap frame [0 .. frames - 1]))
+      frame i = mconcat [ pcm (i * chans + c) (sampleAt c i) | c <- [0 .. chans - 1] ]
+  hSetBinaryMode h True
+  hSetBuffering h (BlockBuffering (Just 65536))
+  hPutBuilder h header
+  -- One builder per block of frames keeps each chunk small.
+  forM_ [0, 4096 .. frames - 1] $ \from ->
+    hPutBuilder h (foldMap frame [from .. min frames (from + 4096) - 1])
 
 -- | Stereo timeline export for the unitless score API.
+-- 16-bit output gets 'defaultDither'.
 writeTimelineMix :: FilePath -> Mix -> Timeline -> IO ()
-writeTimelineMix path mix timeline = exportAs path $ \out -> do
-  (l, r) <- either (ioError . userError) pure (renderTimelineMix mix timeline)
-  pcmWavBits (mixBits mix) out (mixRate mix) [l, r]
+writeTimelineMix = writeTimelineMixWith defaultDither
+
+writeTimelineMixWith :: Dither -> FilePath -> Mix -> Timeline -> IO ()
+writeTimelineMixWith dither = writeTimelineMixEncoded dither 2
+
+-- | Export with a dither and an MP3 VBR quality (0 best .. 9 smallest).
+-- The master stage is applied as samples are written, and encoded formats
+-- are piped to ffmpeg.
+writeTimelineMixEncoded :: Dither -> Int -> FilePath -> Mix -> Timeline -> IO ()
+writeTimelineMixEncoded dither mp3Quality path mix timeline = do
+  (l, r, out) <- either (ioError . userError) pure (renderTimelinePremaster mix timeline)
+  let chans = [l, r]
+      sampleAt c i = out (VU.unsafeIndex (chans !! c) i)
+      frames = min (VU.length l) (VU.length r)
+  checkWav (mixBits mix) 2 frames
+  exportStreamWith mp3Quality path (pcmWavStream dither (mixBits mix) (mixRate mix) 2 frames sampleAt)
+
+-- | Write a WAV stream to @path@: directly for .wav, otherwise through
+-- ffmpeg's standard input (no temporary file).
+exportStream :: FilePath -> (Handle -> IO ()) -> IO ()
+exportStream = exportStreamWith 2
+
+-- | 'exportStream' with an MP3 VBR quality.
+exportStreamWith :: Int -> FilePath -> (Handle -> IO ()) -> IO ()
+exportStreamWith mp3Quality path writeTo = case takeExtension path of
+  ".wav" -> withBinaryFile path WriteMode writeTo
+  extension | Just codec <- encoderArgs mp3Quality extension -> do
+    executable <- findExecutable "ffmpeg"
+    ffmpeg <- maybe (ioError (userError (extension ++ " export requires ffmpeg on PATH"))) pure executable
+    let args = ["-v", "error", "-y", "-f", "wav", "-i", "pipe:0"] ++ codec ++ [path]
+    (Just stdin', _, _, handle) <- createProcess (proc ffmpeg args) {std_in = CreatePipe}
+    writeTo stdin'
+    hClose stdin'
+    code <- waitForProcess handle
+    when (code /= ExitSuccess) (ioError (userError ("ffmpeg failed (" ++ show code ++ ") writing " ++ path)))
+  _ -> ioError (userError ("supported extensions: " ++ unwords audioExtensions))
 
 
 
 -- | Process arguments are passed directly (no shell interpolation); existing
 -- outputs are replaced.
 exportAs :: FilePath -> (FilePath -> IO ()) -> IO ()
-exportAs path writeTo = case takeExtension path of
+exportAs = exportAsWith 2
+
+-- | Output extensions audio export accepts.
+audioExtensions :: [String]
+audioExtensions = [".wav", ".mp3", ".flac", ".ogg", ".opus", ".m4a"]
+
+-- | ffmpeg codec arguments for an output extension, given the MP3 VBR
+-- quality; 'Nothing' for WAV (written natively) or unknown extensions.
+encoderArgs :: Int -> String -> Maybe [String]
+encoderArgs mp3Quality extension = case extension of
+  ".mp3" -> Just ["-codec:a", "libmp3lame", "-q:a", show mp3Quality]
+  ".flac" -> Just []
+  ".ogg" -> Just ["-codec:a", "libvorbis", "-q:a", "6"]
+  ".opus" -> Just ["-codec:a", "libopus", "-b:a", "160k"]
+  ".m4a" -> Just ["-codec:a", "aac", "-b:a", "256k"]
+  _ -> Nothing
+
+-- | 'exportAs' with an MP3 VBR quality.
+exportAsWith :: Int -> FilePath -> (FilePath -> IO ()) -> IO ()
+exportAsWith mp3Quality path writeTo = case takeExtension path of
   ".wav" -> writeTo path
-  extension | extension `elem` [".mp3", ".flac"] -> do
+  extension | Just codec <- encoderArgs mp3Quality extension -> do
     executable <- findExecutable "ffmpeg"
-    ffmpeg <- maybe (ioError (userError "MP3/FLAC export requires ffmpeg on PATH")) pure executable
+    ffmpeg <- maybe (ioError (userError (extension ++ " export requires ffmpeg on PATH"))) pure executable
     withSystemTempFile "neo-music.wav" $ \tmp handle -> do
       hClose handle
       writeTo tmp
-      callProcess ffmpeg (["-v", "error", "-y", "-i", tmp] ++
-        (if extension == ".mp3" then ["-codec:a", "libmp3lame", "-q:a", "2"] else []) ++ [path])
-  _ -> ioError (userError "supported extensions: .wav, .mp3, .flac")
+      callProcess ffmpeg (["-v", "error", "-y", "-i", tmp] ++ codec ++ [path])
+  _ -> ioError (userError ("supported extensions: " ++ unwords audioExtensions))

@@ -1,0 +1,36 @@
+cabal-version: 3.0
+name:           neomusic-pieces
+version:        0.1.0.0
+synopsis:       Personal pieces written directly against the neomusic library
+license:        GPL-3.0-only
+license-file:   LICENSE
+author:         Jasen Qin
+maintainer:     jasen.qin33@gmail.com
+copyright:      2025 Jasen Qin
+build-type:     Simple
+extra-source-files:
+    terra-bgm/README.md
+    terra-bgm/master.py
+
+common piece
+  build-depends: base >=4.7 && <5, containers, vector, neomusic
+  ghc-options:
+    -O2 -Wall -Wcompat -Widentities -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules
+    -Wpartial-fields -Wredundant-constraints
+  default-language: Haskell2010
+
+executable screw-anime
+  import: piece
+  main-is: Main.hs
+  hs-source-dirs: screw-anime
+
+executable screw-bgm
+  import: piece
+  main-is: Main.hs
+  hs-source-dirs: screw-bgm
+
+executable terra-bgm
+  import: piece
+  main-is: Main.hs
+  hs-source-dirs: terra-bgm
