@@ -1,0 +1,8 @@
+-- Regression fixture: a short phrase through the hall reverb, drive and a
+-- 24-bit 22.05 kHz master, so the golden covers reverb and mastering.
+tempo 150
+tuning 12 at C4
+instrument right = piano send 0.6 staff treble
+reverb hall room 0.9 wet 0.45 predelay 0.03
+master drive 1.2 peak 0.89 tail 1 rate 22050 bits 24
+right: [0 4 7 12]:1/2 (0 4 7):2
