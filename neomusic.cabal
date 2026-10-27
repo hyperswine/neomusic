@@ -25,6 +25,10 @@ extra-source-files:
     examples/neomusic/acoustic/*.json
     examples/neomusic/acoustic/README.md
     test/golden/neomusic/*.ly
+    test/golden/regression/*.neomusic
+    test/golden/regression/*.parse
+    test/golden/regression/*.audio
+    test/golden/regression/*.mid
     src/NeoMusic/prelude.neomusic
 
 source-repository head
@@ -102,6 +106,7 @@ test-suite neomusic-test
   hs-source-dirs: test
   other-modules:
       CliTests
+    , GoldenTests
     , NeoMusicScoreTests
     , NeoMusicTests
   build-depends: neomusic, hedgehog
