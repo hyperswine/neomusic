@@ -7,7 +7,7 @@ module NeoMusic.Score
   , addPitch, scaleStrength, strengthAcross, scaleLevel, levelAcross, dynamicsAcross, pitchAcross, addLag, lagAcross, glide, vel, pitchParts, bendMotion, swellMotion, vibrates
   , BeatEvent(..), n, chord, rest, hit, hush, transpose, invert, retro, stretch
   , withRhythm, withGate, scaleGate, staccato, pedal
-  , mapPhrases, scaleScore, reverseScore, ensemble, conductorTrack, arrange, conductorOf, withoutTempo, tempoClash, scoreLength, flatten, validate, render, writeAudio, writeAudioWith
+  , mapPhrases, scaleScore, reverseScore, ensemble, conductorTrack, arrange, conductorOf, withoutTempo, tempoClash, scoreLength, flatten, validate, render, writeAudio, writeAudioWith, writeAudioEncoded
   , defaultInstrument, defaultPerformance
   ) where
 
@@ -662,6 +662,10 @@ writeAudio = writeAudioWith A.defaultDither
 
 -- | 'writeAudio' with an explicit 16-bit dither ('A.NoDither' to truncate).
 writeAudioWith :: A.Dither -> FilePath -> Performance -> Score -> IO ()
-writeAudioWith dither path performance score = do
+writeAudioWith dither = writeAudioEncoded dither 2
+
+-- | 'writeAudioWith' plus the MP3 VBR quality (0 best .. 9 smallest).
+writeAudioEncoded :: A.Dither -> Int -> FilePath -> Performance -> Score -> IO ()
+writeAudioEncoded dither mp3Quality path performance score = do
   timeline <- either (ioError . userError) pure (render performance score)
-  A.writeTimelineMixWith dither path (mix performance) timeline
+  A.writeTimelineMixEncoded dither mp3Quality path (mix performance) timeline

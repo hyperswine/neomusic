@@ -4,6 +4,8 @@ module NeoMusic.Cli
   , playerCandidates, pickPlayer
   ) where
 
+import Text.Read (readMaybe)
+
 -- | What the command line asked for.
 data Invocation
   = Audio Bool FilePath (Maybe FilePath) AudioOpts
@@ -16,23 +18,30 @@ data Invocation
   deriving (Eq, Show)
 
 -- | Options for @render@ and @play@.
-newtype AudioOpts = AudioOpts
-  { optDither :: Bool  -- ^ TPDF-dither 16-bit output (default on; @--no-dither@)
+data AudioOpts = AudioOpts
+  { optDither :: Bool             -- ^ TPDF-dither 16-bit output (default on; @--no-dither@)
+  , optRate :: Maybe Int          -- ^ @--rate@: override the score's sample rate
+  , optBits :: Maybe Int          -- ^ @--bits@: override the score's export depth
+  , optMp3Quality :: Maybe Int    -- ^ @--mp3-quality@: LAME VBR 0 (best) .. 9; default 2
   } deriving (Eq, Show)
 
 defaultAudioOpts :: AudioOpts
-defaultAudioOpts = AudioOpts { optDither = True }
+defaultAudioOpts = AudioOpts { optDither = True, optRate = Nothing, optBits = Nothing, optMp3Quality = Nothing }
 
 usage :: String
 usage = unlines
-  [ "usage: neo-music render song.neomusic -o out.{wav|mp3|flac} [audio options]"
+  [ "usage: neo-music render song.neomusic -o out.{wav|mp3|flac|ogg|opus|m4a} [audio options]"
   , "       neo-music play song.neomusic [-o out.wav] [audio options]   (no -o: render and play now)"
   , "       neo-music {midi|sheet|hybrid|staff} song.neomusic -o output [sheet/hybrid: --marks] [staff: --pdf --no-numbers]"
   , "       neo-music sheet song.neomusic [--marks]      (numeric sheet to stdout)"
   , "       neo-music check song.neomusic"
   , ""
   , "audio options:"
-  , "  --no-dither   truncate to 16 bits instead of TPDF dither (24-bit is never dithered)"
+  , "  --rate HZ          sample rate, 8000..192000 (default: the score's, usually 44100)"
+  , "  --bits 16|24       export depth (default: the score's, usually 16)"
+  , "  --mp3-quality 0-9  LAME VBR quality, 0 best (default 2)"
+  , "  --no-dither        truncate to 16 bits instead of TPDF dither (24-bit is never dithered)"
+  , "  mp3/flac/ogg/opus/m4a are encoded by ffmpeg, which must be on PATH"
   , ""
   , "play uses afplay on macOS, or ffplay/aplay elsewhere, whichever is on PATH."
   ]
@@ -60,7 +69,18 @@ parseAudio play input = go Nothing defaultAudioOpts
       [] -> Right (Audio play input out opts)
       "-o" : file : rest | out == Nothing -> go (Just file) opts rest
       "--no-dither" : rest -> go out opts {optDither = False} rest
+      "--rate" : v : rest | optRate opts == Nothing ->
+        number "--rate" v (\r -> r >= 8000 && r <= 192000) "8000..192000" >>= \r -> go out opts {optRate = Just r} rest
+      "--bits" : v : rest | optBits opts == Nothing ->
+        number "--bits" v (`elem` [16, 24]) "16 or 24" >>= \b -> go out opts {optBits = Just b} rest
+      "--mp3-quality" : v : rest | optMp3Quality opts == Nothing ->
+        number "--mp3-quality" v (\q -> q >= 0 && q <= 9) "0..9" >>= \q -> go out opts {optMp3Quality = Just q} rest
       flag : _ -> Left ("unknown or repeated audio option: "++flag++"\n\n"++usage)
+
+number :: String -> String -> (Int -> Bool) -> String -> Either String Int
+number flag v ok range = case readMaybe v of
+  Just x | ok x -> Right x
+  _ -> Left (flag ++ " must be " ++ range ++ ", got " ++ show v)
 
 -- | Audio players to try, in order, for an operating system name as in
 -- 'System.Info.os', with the arguments that play a WAV file and exit.

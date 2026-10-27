@@ -16,7 +16,8 @@ module NeoMusic.Audio
     -- * Mixing and export
   , Reverb(..), Mix(..), noReverb, hall, defaultMix, validMix
   , renderTimelineMix, writeTimelineMix, writeTimelineMixWith, pcmWav, pcmWavBits, pcmWavWith
-  , Dither (..), defaultDither, tpdfNoise, exportAs
+  , Dither (..), defaultDither, tpdfNoise, exportAs, exportAsWith, encoderArgs, audioExtensions
+  , writeTimelineMixEncoded
   ) where
 
 import Control.Monad (forM, forM_, unless, when)
@@ -1416,7 +1417,11 @@ writeTimelineMix :: FilePath -> Mix -> Timeline -> IO ()
 writeTimelineMix = writeTimelineMixWith defaultDither
 
 writeTimelineMixWith :: Dither -> FilePath -> Mix -> Timeline -> IO ()
-writeTimelineMixWith dither path mix timeline = exportAs path $ \out -> do
+writeTimelineMixWith dither = writeTimelineMixEncoded dither 2
+
+-- | Export with a dither and an MP3 VBR quality (0 best .. 9 smallest).
+writeTimelineMixEncoded :: Dither -> Int -> FilePath -> Mix -> Timeline -> IO ()
+writeTimelineMixEncoded dither mp3Quality path mix timeline = exportAsWith mp3Quality path $ \out -> do
   (l, r) <- either (ioError . userError) pure (renderTimelineMix mix timeline)
   pcmWavWith dither (mixBits mix) out (mixRate mix) [l, r]
 
@@ -1425,14 +1430,32 @@ writeTimelineMixWith dither path mix timeline = exportAs path $ \out -> do
 -- | Process arguments are passed directly (no shell interpolation); existing
 -- outputs are replaced.
 exportAs :: FilePath -> (FilePath -> IO ()) -> IO ()
-exportAs path writeTo = case takeExtension path of
+exportAs = exportAsWith 2
+
+-- | Output extensions audio export accepts.
+audioExtensions :: [String]
+audioExtensions = [".wav", ".mp3", ".flac", ".ogg", ".opus", ".m4a"]
+
+-- | ffmpeg codec arguments for an output extension, given the MP3 VBR
+-- quality; 'Nothing' for WAV (written natively) or unknown extensions.
+encoderArgs :: Int -> String -> Maybe [String]
+encoderArgs mp3Quality extension = case extension of
+  ".mp3" -> Just ["-codec:a", "libmp3lame", "-q:a", show mp3Quality]
+  ".flac" -> Just []
+  ".ogg" -> Just ["-codec:a", "libvorbis", "-q:a", "6"]
+  ".opus" -> Just ["-codec:a", "libopus", "-b:a", "160k"]
+  ".m4a" -> Just ["-codec:a", "aac", "-b:a", "256k"]
+  _ -> Nothing
+
+-- | 'exportAs' with an MP3 VBR quality.
+exportAsWith :: Int -> FilePath -> (FilePath -> IO ()) -> IO ()
+exportAsWith mp3Quality path writeTo = case takeExtension path of
   ".wav" -> writeTo path
-  extension | extension `elem` [".mp3", ".flac"] -> do
+  extension | Just codec <- encoderArgs mp3Quality extension -> do
     executable <- findExecutable "ffmpeg"
-    ffmpeg <- maybe (ioError (userError "MP3/FLAC export requires ffmpeg on PATH")) pure executable
+    ffmpeg <- maybe (ioError (userError (extension ++ " export requires ffmpeg on PATH"))) pure executable
     withSystemTempFile "neo-music.wav" $ \tmp handle -> do
       hClose handle
       writeTo tmp
-      callProcess ffmpeg (["-v", "error", "-y", "-i", tmp] ++
-        (if extension == ".mp3" then ["-codec:a", "libmp3lame", "-q:a", "2"] else []) ++ [path])
-  _ -> ioError (userError "supported extensions: .wav, .mp3, .flac")
+      callProcess ffmpeg (["-v", "error", "-y", "-i", tmp] ++ codec ++ [path])
+  _ -> ioError (userError ("supported extensions: " ++ unwords audioExtensions))

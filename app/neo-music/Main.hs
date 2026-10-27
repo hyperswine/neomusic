@@ -37,7 +37,11 @@ renderTo :: AudioOpts -> FilePath -> FilePath -> IO ()
 renderTo opts input output = do
   doc <- readDocument input
   let dither = if optDither opts then A.defaultDither else A.NoDither
-  S.writeAudioWith dither output (performance doc) (score doc)
+      perf = performance doc
+      base = S.mix perf
+      mixed = base { A.mixRate = maybe (A.mixRate base) id (optRate opts)
+                   , A.mixBits = maybe (A.mixBits base) id (optBits opts) }
+  S.writeAudioEncoded dither (maybe 2 id (optMp3Quality opts)) output perf {S.mix = mixed} (score doc)
 
 -- | Render to a temporary WAV and play it with the first available player.
 playNow :: AudioOpts -> FilePath -> IO ()
