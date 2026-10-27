@@ -7,7 +7,7 @@ module NeoMusic.Score
   , addPitch, scaleStrength, strengthAcross, scaleLevel, levelAcross, dynamicsAcross, pitchAcross, addLag, lagAcross, glide, vel, pitchParts, bendMotion, swellMotion, vibrates
   , BeatEvent(..), n, chord, rest, hit, hush, transpose, invert, retro, stretch
   , withRhythm, withGate, scaleGate, staccato, pedal
-  , mapPhrases, scaleScore, reverseScore, ensemble, conductorTrack, arrange, conductorOf, withoutTempo, tempoClash, scoreLength, flatten, validate, render, writeAudio
+  , mapPhrases, scaleScore, reverseScore, ensemble, conductorTrack, arrange, conductorOf, withoutTempo, tempoClash, scoreLength, flatten, validate, render, writeAudio, writeAudioWith
   , defaultInstrument, defaultPerformance
   ) where
 
@@ -658,6 +658,10 @@ finite x = not (isNaN x || isInfinite x)
 positive x = finite x && x > 0
 
 writeAudio :: FilePath -> Performance -> Score -> IO ()
-writeAudio path performance score = do
+writeAudio = writeAudioWith A.defaultDither
+
+-- | 'writeAudio' with an explicit 16-bit dither ('A.NoDither' to truncate).
+writeAudioWith :: A.Dither -> FilePath -> Performance -> Score -> IO ()
+writeAudioWith dither path performance score = do
   timeline <- either (ioError . userError) pure (render performance score)
-  A.writeTimelineMix path (mix performance) timeline
+  A.writeTimelineMixWith dither path (mix performance) timeline

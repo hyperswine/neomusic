@@ -1,13 +1,13 @@
 -- | Command-line parsing for @neo-music@, kept pure so it can be tested.
 module NeoMusic.Cli
-  ( Invocation (..), parseArgs, usage
+  ( Invocation (..), AudioOpts (..), defaultAudioOpts, parseArgs, usage
   , playerCandidates, pickPlayer
   ) where
 
 -- | What the command line asked for.
 data Invocation
-  = Audio Bool FilePath (Maybe FilePath)
-    -- ^ play?, input, output: @render@ (always writes @-o@) or @play@ (writes @-o@ if given,
+  = Audio Bool FilePath (Maybe FilePath) AudioOpts
+    -- ^ play?, input, output, options: @render@ (always writes @-o@) or @play@ (writes @-o@ if given,
     -- otherwise renders to a temporary file and plays it)
   | Export String FilePath FilePath [String]
     -- ^ midi, sheet, hybrid or staff to a file, with flags
@@ -15,23 +15,34 @@ data Invocation
   | Check FilePath
   deriving (Eq, Show)
 
+-- | Options for @render@ and @play@.
+newtype AudioOpts = AudioOpts
+  { optDither :: Bool  -- ^ TPDF-dither 16-bit output (default on; @--no-dither@)
+  } deriving (Eq, Show)
+
+defaultAudioOpts :: AudioOpts
+defaultAudioOpts = AudioOpts { optDither = True }
+
 usage :: String
 usage = unlines
-  [ "usage: neo-music render song.neomusic -o out.{wav|mp3|flac}"
-  , "       neo-music play song.neomusic [-o out.wav]   (no -o: render and play now)"
+  [ "usage: neo-music render song.neomusic -o out.{wav|mp3|flac} [audio options]"
+  , "       neo-music play song.neomusic [-o out.wav] [audio options]   (no -o: render and play now)"
   , "       neo-music {midi|sheet|hybrid|staff} song.neomusic -o output [sheet/hybrid: --marks] [staff: --pdf --no-numbers]"
   , "       neo-music sheet song.neomusic [--marks]      (numeric sheet to stdout)"
   , "       neo-music check song.neomusic"
+  , ""
+  , "audio options:"
+  , "  --no-dither   truncate to 16 bits instead of TPDF dither (24-bit is never dithered)"
   , ""
   , "play uses afplay on macOS, or ffplay/aplay elsewhere, whichever is on PATH."
   ]
 
 parseArgs :: [String] -> Either String Invocation
 parseArgs args = case args of
-  ["render", input, "-o", output] -> Right (Audio False input (Just output))
-  ["render", _] -> Left "render needs an output file: neo-music render song.neomusic -o out.wav"
-  ["play", input, "-o", output] -> Right (Audio True input (Just output))
-  ["play", input] -> Right (Audio True input Nothing)
+  "render" : input : rest -> parseAudio False input rest >>= \a -> case a of
+    Audio _ _ Nothing _ -> Left "render needs an output file: neo-music render song.neomusic -o out.wav"
+    _ -> Right a
+  "play" : input : rest -> parseAudio True input rest
   [command, input, "-o", output] | command `elem` ["midi", "sheet", "hybrid", "staff"] ->
     Right (Export command input output [])
   "sheet" : input : "-o" : output : flags | flags == ["--marks"] -> Right (Export "sheet" input output flags)
@@ -41,6 +52,15 @@ parseArgs args = case args of
   "sheet" : input : flags | all (== "--marks") flags -> Right (SheetStdout input flags)
   ["check", input] -> Right (Check input)
   _ -> Left usage
+
+parseAudio :: Bool -> FilePath -> [String] -> Either String Invocation
+parseAudio play input = go Nothing defaultAudioOpts
+  where
+    go out opts args = case args of
+      [] -> Right (Audio play input out opts)
+      "-o" : file : rest | out == Nothing -> go (Just file) opts rest
+      "--no-dither" : rest -> go out opts {optDither = False} rest
+      flag : _ -> Left ("unknown or repeated audio option: "++flag++"\n\n"++usage)
 
 -- | Audio players to try, in order, for an operating system name as in
 -- 'System.Info.os', with the arguments that play a WAV file and exit.
