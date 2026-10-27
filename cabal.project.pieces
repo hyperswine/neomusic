@@ -1,0 +1,5 @@
+-- The library plus the personal pieces in pieces/:
+--   cabal build all --project-file=cabal.project.pieces
+--   cabal run terra-bgm --project-file=cabal.project.pieces -- --check
+import: cabal.project
+packages: pieces

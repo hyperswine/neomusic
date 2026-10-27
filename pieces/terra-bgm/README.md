@@ -22,9 +22,9 @@ release/reverb makes the exported track approximately 94.98 seconds.
 From the repository root, with cabal and FFmpeg installed:
 
 ```sh
-cabal run terra-bgm -- --check
-cabal run terra-bgm -- /tmp/skyward-raw.wav
-python3 app/terra-bgm/master.py /tmp/skyward-raw.wav ../qos/models/music/Skyward_Little_World.mp3
+cabal run terra-bgm --project-file=cabal.project.pieces -- --check
+cabal run terra-bgm --project-file=cabal.project.pieces -- /tmp/skyward-raw.wav
+python3 pieces/terra-bgm/master.py /tmp/skyward-raw.wav ../qos/models/music/Skyward_Little_World.mp3
 ```
 
 `FFMPEG=/path/to/ffmpeg` can select an alternate encoder. NeoMusic creates all

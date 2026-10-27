@@ -73,27 +73,6 @@ executable neo-music
   build-depends: neomusic
   ghc-options: -O2
 
-executable screw-anime
-  import: warnings, deps
-  main-is: Main.hs
-  hs-source-dirs: app/screw-anime
-  build-depends: neomusic
-  ghc-options: -O2
-
-executable screw-bgm
-  import: warnings, deps
-  main-is: Main.hs
-  hs-source-dirs: app/screw-bgm
-  build-depends: neomusic
-  ghc-options: -O2
-
-executable terra-bgm
-  import: warnings, deps
-  main-is: Main.hs
-  hs-source-dirs: app/terra-bgm
-  build-depends: neomusic
-  ghc-options: -O2
-
 test-suite neomusic-test
   import: warnings, deps
   type: exitcode-stdio-1.0
