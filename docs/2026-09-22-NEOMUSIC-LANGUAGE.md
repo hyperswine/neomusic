@@ -29,6 +29,8 @@ cabal test
 `render` writes an audio file. `play` without `-o` renders to a temporary WAV and
 plays it with `afplay` (macOS) or `ffplay`/`aplay` (whichever is on PATH), and
 says so if none is found; `play -o file` behaves like `render`. WAV synthesis is native.
+16-bit output gets seeded TPDF dither (the same score renders byte-identically every
+time); `--no-dither` truncates instead. 24-bit output is never dithered.
 MP3/FLAC need `ffmpeg` on PATH. `.ly` generation is native; `--pdf` invokes
 `lilypond` on PATH. Source is still saved if LilyPond is missing. Exports overwrite
 the named output. `sheet` and `hybrid` take `--marks` to show gate and curve

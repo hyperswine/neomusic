@@ -23,8 +23,8 @@ main = do
   args <- getArgs
   invocation <- either die pure (parseArgs args)
   case invocation of
-    Audio _ input (Just output) -> renderTo input output
-    Audio _ input Nothing -> playNow input
+    Audio _ input (Just output) opts -> renderTo opts input output
+    Audio _ input Nothing opts -> playNow opts input
     Export command input output flags -> run command input output flags
     SheetStdout input flags -> readDocument input >>= \doc ->
       orDie (numericPage (plain {showMarks = not (null flags)}) (performance doc) (score doc)) >>= putStr
@@ -33,14 +33,15 @@ main = do
       timeline <- orDie (S.render (performance doc) (score doc))
       putStrLn (show (length (A.notes timeline))++" notes, "++show (A.seconds timeline)++" seconds")
 
-renderTo :: FilePath -> FilePath -> IO ()
-renderTo input output = do
+renderTo :: AudioOpts -> FilePath -> FilePath -> IO ()
+renderTo opts input output = do
   doc <- readDocument input
-  S.writeAudio output (performance doc) (score doc)
+  let dither = if optDither opts then A.defaultDither else A.NoDither
+  S.writeAudioWith dither output (performance doc) (score doc)
 
 -- | Render to a temporary WAV and play it with the first available player.
-playNow :: FilePath -> IO ()
-playNow input = do
+playNow :: AudioOpts -> FilePath -> IO ()
+playNow opts input = do
   found <- mapM (\(name, _) -> (,) name . isJust <$> findExecutable name) (playerCandidates os)
   let available name = maybe False id (lookup name found)
   case pickPlayer os available "" of
@@ -49,7 +50,7 @@ playNow input = do
       ++ "). Install one, or write a file with: neo-music render "++input++" -o out.wav")
     Just _ -> withSystemTempDirectory "neo-music" $ \dir -> do
       let wav = dir </> "play.wav"
-      renderTo input wav
+      renderTo opts input wav
       case pickPlayer os available wav of
         Just (player, playerArgs) -> callProcess player playerArgs
         Nothing -> pure ()

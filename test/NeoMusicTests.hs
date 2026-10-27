@@ -14,6 +14,7 @@ import System.IO (hClose)
 import NeoMusic.Audio
   ( Contour(..), Mix(..), Mod(..), Osc(..), Patch(..), Note(..), Timeline(..), Voice(..), Wave(..)
   , adsr, basicPatch, cutoffHz, defaultMix, expandClassic, hall, hat, kick, modAt, noReverb, noiseSweep, note
+  , Dither(..), pcmWavWith, tpdfNoise
   , pcmWav, pcmWavBits, percussive, pianoPatch, pluck, reeseBass, renderTimelineMix, sawPatch, sinePatch, snare
   , squarePatch, subBass, supersaw, validPatch, validVoice, Room(..) )
 import qualified Data.Map.Strict as Map
@@ -358,4 +359,30 @@ neoMusicGroup = Group "NeoMusic audio engine"
       let peak = VU.maximum (VU.map abs (VU.take half cut))
           lastWindow = VU.slice (half + 66) 22 cut              -- the final half millisecond
       assert (VU.maximum (VU.map abs lastWindow) < 0.3 * peak))
+  , ("16-bit TPDF dither: seeded, within one step, 24-bit untouched", withTests 1 $ property $ do
+      let lsb = 1 / 32767
+          quiet = VU.generate 4000 (\i -> 0.4 * lsb * sin (2 * pi * 440 * fromIntegral i / 8000))
+          tone = VU.generate 4000 (\i -> 0.5 * sin (2 * pi * 220 * fromIntegral i / 8000))
+          samples16 bytes = [ fromIntegral (BL.index bytes k) + 256 * fromIntegral (BL.index bytes (k + 1))
+                              - (if BL.index bytes (k + 1) >= 128 then 65536 else 0) :: Int
+                            | k <- [44, 46 .. BL.length bytes - 2] ]
+          write dither bits chans = withSystemTempDirectory "neomusic" $ \dir -> do
+            pcmWavWith dither bits (dir </> "x.wav") 8000 chans
+            bytes <- BL.readFile (dir </> "x.wav")
+            BL.length bytes `seq` pure bytes
+      (a, b, c, plainTone, ditherTone, quietPlain, quietDither, p24, d24) <- evalIO $ (,,,,,,,,)
+        <$> write (Tpdf 1) 16 [tone, tone] <*> write (Tpdf 1) 16 [tone, tone] <*> write (Tpdf 2) 16 [tone, tone]
+        <*> write NoDither 16 [tone] <*> write (Tpdf 7) 16 [tone]
+        <*> write NoDither 16 [quiet] <*> write (Tpdf 7) 16 [quiet]
+        <*> write NoDither 24 [tone] <*> write (Tpdf 7) 24 [tone]
+      a === b
+      assert (a /= c)
+      assert (all ((<= 1) . abs) (zipWith (-) (samples16 plainTone) (samples16 ditherTone)))
+      assert (samples16 plainTone /= samples16 ditherTone)
+      assert (all (== 0) (samples16 quietPlain))
+      assert (any (/= 0) (samples16 quietDither))
+      p24 === d24
+      let noise = map (tpdfNoise 42) [0 .. 19999]
+      assert (all (\x -> x > -1 && x < 1) noise)
+      assert (abs (sum noise / 20000) < 0.02))
   ]
