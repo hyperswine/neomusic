@@ -14,7 +14,8 @@ The design notes, oldest first, are indexed in [docs/README.md](docs/README.md).
 ## Install with Homebrew
 
 ```sh
-brew install hyperswine/neomusic/neo-music
+brew tap hyperswine/neomusic && brew trust hyperswine/neomusic
+brew install neo-music
 ```
 
 The [tap](https://github.com/hyperswine/homebrew-neomusic) builds the latest
