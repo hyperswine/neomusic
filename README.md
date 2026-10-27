@@ -33,14 +33,19 @@ on the path; sheet music needs LilyPond.
 | `src/NeoMusic/` | the library: `Score`, `Signal`, `Language`, `Audio`, `Recording`, `Midi`, `Numeric`, `Sheet`, and the prelude |
 | `app/neo-music` | the command-line renderer for `.neomusic` files |
 | `app/screw-bgm`, `app/screw-anime`, `app/terra-bgm` | scores written against the library directly |
-| `examples/neomusic/` | example scores, SFZ instrument maps for the VSCO 2 CE samples, and room impulse tooling |
+| `examples/neomusic/` | example scores, SFZ instrument maps for VSCO 2 CE, Salamander and Meta guitars, and room impulse tooling |
 | `test/` | Hedgehog properties and LilyPond golden files |
 | `docs/` | the dated design record |
 
-Recorded instruments and rooms are not in this repository: the SFZ maps
-expect the VSCO 2 Community Edition samples (see
-[the samples note](docs/2026-10-14-NEOMUSIC-SAMPLES.md) and
-`examples/neomusic/vsco/make-sfz.py`).
+Recorded instruments and rooms are kept outside this repository. For Salamander
+piano and Meta nylon/steel guitars, use the
+[acoustic setup guide](examples/neomusic/acoustic/README.md). For VSCO 2 Community
+Edition samples, see [the samples note](docs/2026-10-14-NEOMUSIC-SAMPLES.md) and
+`examples/neomusic/vsco/make-sfz.py`.
+
+Listen to [Last Train, Blue Hour](examples/neomusic/audio/last-train-blue-hour.mp3),
+a 2:40 J-pop/jazz piece for Salamander piano and both guitars. Its
+[score and arrangement notes](docs/2026-10-27-LAST-TRAIN-BLUE-HOUR.md) describe the form and rendering.
 
 ## History
 

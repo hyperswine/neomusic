@@ -42,3 +42,6 @@ Pages written before 2026-10-21 came from HaskPlayground, where they moved into 
 | 2026-10-21 | [NEOMUSIC-COMPOSITION](2026-10-21-NEOMUSIC-COMPOSITION.md) | plan and implementation record: strength, clocks, conductor ownership and pitch identity |
 | 2026-10-21 | [NEOMUSIC-BUG-REVIEW](2026-10-21-NEOMUSIC-BUG-REVIEW.md) | follow-up fixes: held expression bounds, effective MIDI tempo and unit-ratio cents |
 | 2026-10-22 | [NEOMUSIC-TEMPO-HOISTING](2026-10-22-NEOMUSIC-TEMPO-HOISTING.md) | prototype: tempo hoisted from any part, one ownership rule instead of three |
+| 2026-10-24 | [NEOMUSIC-PIANO-AND-GUITARS](2026-10-24-NEOMUSIC-PIANO-AND-GUITARS.md) | intent: integrate Salamander piano and Meta nylon- and steel-string guitars |
+| 2026-10-27 | [NEOMUSIC-ACOUSTIC-INSTRUMENTS](2026-10-27-NEOMUSIC-ACOUSTIC-INSTRUMENTS.md) | first Salamander and Meta guitar integration, setup, render evidence and remaining limits |
+| 2026-10-27 | [LAST-TRAIN-BLUE-HOUR](2026-10-27-LAST-TRAIN-BLUE-HOUR.md) | original 72-bar J-pop/jazz acoustic trio, MP3 audition and score |

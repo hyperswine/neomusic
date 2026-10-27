@@ -1,0 +1,160 @@
+-- "Last Train, Blue Hour" — an original acoustic J-pop / jazz miniature.
+-- 72 bars, 112 BPM, C major / A minor. Source is numeric and compositional.
+-- Form: intro 4, verse 16, pre 8, chorus 16, bridge 8, final chorus 16, outro 4.
+-- Instruments and credits: acoustic/README.md; recordings live outside Git.
+tempo 112
+tuning 12 at C4
+meter 4
+key C
+master rate 44100 bits 24 peak 0.86 tail 3
+reverb hall room 0.65 damping 0.55 width 1 wet 0.18 predelay 0.018
+sound grand = gain ((0.6 + 0.4 * velocity) * adsr 0.001 0 1 0.32) sampled "acoustic/salamander.sfz"
+sound nylonVoice = gain ((0.45 + 0.55 * velocity) * adsr 0.001 0 1 0.36) sampled "acoustic/meta-nylon-finger.sfz"
+sound steelVoice = gain ((0.45 + 0.55 * velocity) * adsr 0.001 0 1 0.23) sampled "acoustic/meta-steel.sfz"
+instrument melody = grand gain 0.95 pan 0.04 send 0.3
+instrument keys = grand gain 0.48 pan -0.06 send 0.24
+instrument nylon = nylonVoice gain 1.2 pan -0.42 send 0.19
+instrument steel = steelVoice gain 1.6 pan 0.42 send 0.17
+
+-- Four-beat building blocks; plain functions, no instrument-specific syntax.
+comp #root chord = [vel 0.85 [root:2] vel 0.7 [[root + 7]:2]] & [_:1/2 gate 0.8 [chord] _:1/2 vel 0.8 [gate 0.8 [chord:3/2]] _:1/2]
+flow #r #a #b #c = gate 1.25 [r vel 0.8 [a] b vel 0.9 [c] b vel 0.8 [a] c vel 0.7 [a]]:1/2
+brush #a #b #c = a & lag 1/32 [b] & lag 1/16 [c]
+chop #a #b #c = gate 0.58 [_:1/2 vel 0.8 [brush a b c]:1/2 _:1/2 brush a b c _:1/2 vel 0.75 [brush a b c]:1/2 _:1/2]
+light #a #b #c = _:1 vel 0.8 [brush a b c]:1/2 _:3/2 vel 0.65 [brush a b c]:1/2 _:1/2
+player #seed music = loose seed 1/80 [vary seed 0.1 [music]]
+
+-- Voicings favour major ninths, minor ninths, sixths and secondary dominants.
+
+pC = comp -24 (-1 4 7 14)
+nC = flow -12 -5 4 11
+sC = chop 4 11 14
+lC = light 4 11 14
+pE = comp -20 (-4 2 8 11)
+nE = flow -20 -8 2 8
+sE = chop 2 8 11
+lE = light 2 8 11
+pAm = comp -27 (-5 0 4 11)
+nAm = flow -15 -8 0 7
+sAm = chop 0 7 11
+lAm = light 0 7 11
+pAmG = comp -29 (-3 0 4 9)
+nAmG = flow -17 -8 0 9
+sAmG = chop 0 4 9
+lAmG = light 0 4 9
+pF = comp -31 (-3 4 7 12)
+nF = flow -19 -12 -3 4
+sF = chop 4 9 12
+lF = light 4 9 12
+pEm = comp -32 (-5 2 7 11)
+nEm = flow -20 -13 -5 2
+sEm = chop 2 7 11
+lEm = light 2 7 11
+pDm = comp -26 (-7 0 4 9)
+nDm = flow -10 -3 0 5
+sDm = chop 0 5 9
+lDm = light 0 5 9
+pG = comp -29 (-7 -1 4 9)
+nG = flow -17 -10 -1 5
+sG = chop -1 4 9
+lG = light -1 4 9
+pCdom = comp -24 (-2 4 7 12)
+nCdom = flow -12 -5 4 10
+sCdom = chop 4 10 12
+pAdom = comp -27 (-5 1 4 10)
+nAdom = flow -15 -8 1 7
+sAdom = chop 1 7 10
+pFm = comp -31 (-4 2 5 8)
+nFm = flow -19 -12 -4 2
+sFm = chop 2 8 12
+lFm = light 2 8 12
+pCend = comp -24 (0 4 9 14)
+nCend = flow -12 -5 4 9
+sCend = chop 4 9 12
+lCend = light 4 9 12
+
+-- Harmonic sections, one named cell per four-beat phrase.
+pIntro = pC pAm pF pG
+nIntro = nC nAm nF nG
+pVerse = pC pE pAm pAmG pF pEm pDm pG
+nVerse = nC nE nAm nAmG nF nEm nDm nG
+sVerse = sC sE sAm sAmG sF sEm sDm sG
+lVerse = lC lE lAm lAmG lF lEm lDm lG
+pPre = pF pG pEm pAm pDm pG pFm pG
+nPre = nF nG nEm nAm nDm nG nFm nG
+sPre = sF sG sEm sAm sDm sG sFm sG
+pChorus = pF pG pEm pAm pDm pG pC pCdom pF pG pEm pAdom pDm pG pCend pE
+nChorus = nF nG nEm nAm nDm nG nC nCdom nF nG nEm nAdom nDm nG nCend nE
+sChorus = sF sG sEm sAm sDm sG sC sCdom sF sG sEm sAdom sDm sG sCend sE
+pBridge = pAm pEm pF pC pDm pEm pFm pG
+pFinal = pF pG pEm pAm pDm pG pC pCdom pF pG pEm pAdom pDm pG pCend pCend
+nFinal = nF nG nEm nAm nDm nG nC nCdom nF nG nEm nAdom nDm nG nCend nCend
+sFinal = sF sG sEm sAm sDm sG sC sCdom sF sG sEm sAdom sDm sG sCend sCend
+pOutro = pF pFm pC pCend
+nOutro = nF nFm nC nCend
+lOutro = lF lFm lC lCend
+
+-- Every line below is one four-beat melodic phrase. Rests let the guitars speak.
+-- Verse: a small rising motif, then a changed answer over the same harmony.
+vOne = _:1/2 [7 11 12]:1/2 14 12
+vTwo = 11:3/2 8:1/2 4 _:1
+vThree = [9 11]:1/2 12:3/2 11:1/2 7
+vFour = 9:2 7 _:1
+vFive = [9 12]:1/2 16 14 12
+vSix = 11:3/2 7:1/2 4 _:1
+vSeven = [5 9 12 14]:1/2 16 12
+vEight = 11 9:1/2 7:1/2 4 _:1
+vNine = _:1/2 [7 11 12]:1/2 16 14
+vTen = 11:3/2 8:1/2 [11 14]:1/2 16
+vEleven = 19:3/2 16:1/2 12 11
+vTwelve = 9:2 [7 4]:1/2 _:1
+vThirteen = 9 [12 16]:1/2 19 16
+vFourteen = 14:3/2 11:1/2 7 _:1
+vFifteen = 9 [12 14]:1/2 16 17
+vSixteen = 14 11 9:1/2 7:1/2 _:1
+verseTune = vOne vTwo vThree vFour vFive vSix vSeven vEight vNine vTen vEleven vTwelve vThirteen vFourteen vFifteen vSixteen
+
+-- Pre-chorus climbs, then borrows F minor before the dominant.
+buildOne = 12 [14 16]:1/2 19 16
+buildTwo = 14 [16 17]:1/2 21 19
+buildThree = 19:3/2 16:1/2 14 11
+buildFour = 16 19 21:3/2 19:1/2
+buildFive = 17 [16 14]:1/2 12 14
+buildSix = 19:2 17 14
+buildSeven = 20:3/2 17:1/2 14 12
+buildEight = 11 14 19 _:1
+buildTune = buildOne buildTwo buildThree buildFour buildFive buildSix buildSeven buildEight
+
+-- Chorus: a singable hook over IV-V-iii-vi, with a jazz turnaround.
+hookOne = 21:3/2 19:1/2 16 19
+hookTwo = 23:3/2 21:1/2 19 14
+hookThree = 19 [16 14]:1/2 11 14
+hookFour = 16:2 [19 16]:1/2 12
+hookFive = 17:3/2 16:1/2 14 12
+hookSix = 14 [16 17]:1/2 19 23
+hookSeven = 24:3 [23 19]:1/2
+hookEight = 22:2 19 _:1
+hookNine = 21 [19 16]:1/2 19 24
+hookTen = 23:3/2 21:1/2 19 17
+hookEleven = 19 [16 14]:1/2 11 14
+hookTwelve = 16:3/2 13:1/2 10 9
+hookThirteen = 17 16 [14 12]:1/2 9
+hookFourteen = 11 14 19 17
+hookFifteen = 16:3/2 14:1/2 12 9
+hookSixteen = 11:2 8 _:1
+chorusTune = hookOne hookTwo hookThree hookFour hookFive hookSix hookSeven hookEight hookNine hookTen hookEleven hookTwelve hookThirteen hookFourteen hookFifteen hookSixteen
+finalTune = hookOne hookTwo hookThree hookFour hookFive hookSix 28:3 [26 24]:1/2 hookEight hookNine hookTen hookEleven hookTwelve hookThirteen hookFourteen 24:3/2 23:1/2 21 19 24:3 _:1
+
+-- Bridge: nylon answers for four bars, then steel for four bars.
+nylonSolo = 9 [11 12]:1/2 16 12  11 [7 4]:1/2 2 7  9:3/2 12:1/2 [16 14]:1/2 12  11 [7 4]:1/2 2:2
+steelSolo = [5 9 12 14]:1/2 17 16  14 [11 7]:1/2 4 7  8:3/2 12:1/2 14 17  19:2 14 11
+introTune = _:8 vel 0.65 [12:3/2 16:1/2 19:2] 14:3 _:1
+outroTune = 16:2 12 9  8:2 5 2  4:3 2  12:4
+
+-- One shared clock. A slight breath into the chorus and a gradual ending.
+conductor: _:108 rit 0.94 [_:4] _:160 rit 0.6 [_:16]
+
+melody: player 11 [gate 0.9 [vel 0.48 [introTune] vel 0.62 [verseTune] cresc 0.65 0.82 [buildTune] vel 0.82 [chorusTune] _:32 vel 0.88 [finalTune] dim 0.62 0.38 [outroTune]]]
+keys: player 23 [vel 0.42 [pIntro] vel 0.48 [pVerse pVerse] cresc 0.48 0.62 [pPre] vel 0.62 [pChorus] vel 0.42 [pBridge] vel 0.66 [pFinal] dim 0.45 0.26 [pOutro]]
+nylon: player 37 [vel 0.66 [nIntro] vel 0.72 [nVerse nVerse] cresc 0.72 0.82 [nPre] vel 0.8 [nChorus] vel 0.92 [gate 0.92 [nylonSolo]] vel 0.6 [nDm nEm nFm nG] vel 0.82 [nFinal] dim 0.65 0.35 [nOutro]]
+steel: player 53 [_:16 vel 0.48 [lVerse] vel 0.58 [sVerse] cresc 0.6 0.78 [sPre] vel 0.8 [sChorus] vel 0.5 [lAm lEm lF lC] vel 0.92 [gate 0.92 [steelSolo]] vel 0.86 [sFinal] dim 0.45 0.28 [lOutro]]
