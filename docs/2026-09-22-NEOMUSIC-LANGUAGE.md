@@ -14,8 +14,9 @@ From the repository root:
 
 ```sh
 cabal run neo-music -- check examples/neomusic/twinkle.neomusic
-cabal run neo-music -- play examples/neomusic/twinkle.neomusic -o twinkle.wav
-cabal run neo-music -- play examples/neomusic/twinkle.neomusic -o twinkle.mp3
+cabal run neo-music -- play examples/neomusic/twinkle.neomusic
+cabal run neo-music -- render examples/neomusic/twinkle.neomusic -o twinkle.wav
+cabal run neo-music -- render examples/neomusic/twinkle.neomusic -o twinkle.mp3
 cabal run neo-music -- midi examples/neomusic/twinkle.neomusic -o twinkle.mid
 cabal run neo-music -- sheet examples/neomusic/twinkle.neomusic -o twinkle.html
 cabal run neo-music -- sheet examples/neomusic/twinkle.neomusic -o twinkle.txt
@@ -25,8 +26,14 @@ cabal run neo-music -- staff examples/neomusic/twinkle.neomusic -o twinkle.ly --
 cabal test
 ```
 
-`play` renders a file; it does not open an audio player. WAV synthesis is native.
-MP3/FLAC need `ffmpeg` on PATH. `.ly` generation is native; `--pdf` invokes
+`render` writes an audio file. `play` without `-o` renders to a temporary WAV and
+plays it with `afplay` (macOS) or `ffplay`/`aplay` (whichever is on PATH), and
+says so if none is found; `play -o file` behaves like `render`. WAV synthesis is native.
+16-bit output gets seeded TPDF dither (the same score renders byte-identically every
+time); `--no-dither` truncates instead. 24-bit output is never dithered.
+MP3/FLAC/Ogg Vorbis/Opus/M4A (AAC) need `ffmpeg` on PATH (Opus is resampled
+to 48 kHz by ffmpeg). `render`/`play` take `--rate HZ` and `--bits 16|24` to override
+the score's mix, and `--mp3-quality 0-9` (LAME VBR, default 2). `.ly` generation is native; `--pdf` invokes
 `lilypond` on PATH. Source is still saved if LilyPond is missing. Exports overwrite
 the named output. `sheet` and `hybrid` take `--marks` to show gate and curve
 marks; `staff` takes `--pdf` and `--no-numbers`.

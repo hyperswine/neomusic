@@ -15,7 +15,9 @@ module NeoMusic.Audio
   , Note(..), Timeline(..), Contour(..), ClockSegment(..), note, contourAt, contourBounds
     -- * Mixing and export
   , Reverb(..), Mix(..), noReverb, hall, defaultMix, validMix
-  , renderTimelineMix, writeTimelineMix, pcmWav, pcmWavBits, exportAs
+  , renderTimelineMix, writeTimelineMix, writeTimelineMixWith, pcmWav, pcmWavBits, pcmWavWith
+  , Dither (..), defaultDither, tpdfNoise, exportAs, exportAsWith, encoderArgs, audioExtensions
+  , writeTimelineMixEncoded
   ) where
 
 import Control.Monad (forM, forM_, unless, when)
@@ -29,7 +31,7 @@ import Data.ByteString.Builder
 import Data.Int (Int16)
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as MV
-import Data.Word (Word32)
+import Data.Word (Word32, Word64)
 import System.Directory (findExecutable)
 import System.FilePath (takeExtension)
 import System.IO (hClose)
@@ -1358,9 +1360,35 @@ master mix l r
 pcmWav :: FilePath -> Int -> [VU.Vector Double] -> IO ()
 pcmWav = pcmWavBits 16
 
--- | Interleaved little-endian PCM WAV at 16 or 24 bits.
+-- | Interleaved little-endian PCM WAV at 16 or 24 bits, without dither.
 pcmWavBits :: Int -> FilePath -> Int -> [VU.Vector Double] -> IO ()
-pcmWavBits bits path rate channels = do
+pcmWavBits = pcmWavWith NoDither
+
+-- | How samples are reduced to 16 bits. 24-bit export is never dithered.
+data Dither
+  = NoDither
+  | Tpdf Word64  -- ^ triangular (TPDF) dither of +/-1 LSB from a seeded
+                 -- generator, so the same seed gives byte-identical files
+  deriving (Eq, Show)
+
+-- | The dither used by 'writeTimelineMix': TPDF with a fixed seed.
+defaultDither :: Dither
+defaultDither = Tpdf 0x6e656f6d75736963
+
+-- | TPDF noise in (-1, 1) LSB for sample index @i@: the sum of two uniform
+-- values from a stateless SplitMix64 hash, so it is pure and reproducible.
+tpdfNoise :: Word64 -> Int -> Double
+tpdfNoise seed i = uniform (2 * fromIntegral i) + uniform (2 * fromIntegral i + 1) - 1
+  where
+    uniform k = fromIntegral (mix64 (seed + k * 0x9e3779b97f4a7c15) `shiftR` 11) / 9007199254740992
+    mix64 z0 = let z1 = (z0 `xor` (z0 `shiftR` 30)) * 0xbf58476d1ce4e5b9
+                   z2 = (z1 `xor` (z1 `shiftR` 27)) * 0x94d049bb133111eb
+               in z2 `xor` (z2 `shiftR` 31)
+
+-- | Interleaved little-endian PCM WAV at 16 or 24 bits; 16-bit samples get
+-- the given dither.
+pcmWavWith :: Dither -> Int -> FilePath -> Int -> [VU.Vector Double] -> IO ()
+pcmWavWith dither bits path rate channels = do
   let chans = length channels
       bytesPer = bits `div` 8
       frames = if null channels then 0 else minimum (map VU.length channels)
@@ -1372,33 +1400,62 @@ pcmWavBits bits path rate channels = do
         <> word32LE (fromIntegral (rate * chans * bytesPer)) <> word16LE (fromIntegral (chans * bytesPer))
         <> word16LE (fromIntegral bits) <> string8 "data" <> word32LE (fromInteger size)
       clamp x = max (-1) (min 1 x)
-      pcm x
-        | bits == 16 = int16LE (round (clamp x * 32767) :: Int16)
+      noise = case dither of
+        NoDither -> const 0
+        Tpdf seed -> tpdfNoise seed
+      pcm k x
+        | bits == 16 = int16LE (fromIntegral (max (-32767) (min 32767 (round (clamp x * 32767 + noise k) :: Int))) :: Int16)
         | otherwise = let v = round (clamp x * 8388607) :: Int
                           u = if v < 0 then v + 16777216 else v
                       in word8 (fromIntegral (u .&. 255)) <> word8 (fromIntegral ((u `shiftR` 8) .&. 255)) <> word8 (fromIntegral (u `shiftR` 16))
-      frame i = foldMap (\ch -> pcm (VU.unsafeIndex ch i)) channels
+      frame i = mconcat [ pcm (i * chans + c) (VU.unsafeIndex ch i) | (c, ch) <- zip [0 ..] channels ]
   BL.writeFile path (toLazyByteString (header <> foldMap frame [0 .. frames - 1]))
 
 -- | Stereo timeline export for the unitless score API.
+-- 16-bit output gets 'defaultDither'.
 writeTimelineMix :: FilePath -> Mix -> Timeline -> IO ()
-writeTimelineMix path mix timeline = exportAs path $ \out -> do
+writeTimelineMix = writeTimelineMixWith defaultDither
+
+writeTimelineMixWith :: Dither -> FilePath -> Mix -> Timeline -> IO ()
+writeTimelineMixWith dither = writeTimelineMixEncoded dither 2
+
+-- | Export with a dither and an MP3 VBR quality (0 best .. 9 smallest).
+writeTimelineMixEncoded :: Dither -> Int -> FilePath -> Mix -> Timeline -> IO ()
+writeTimelineMixEncoded dither mp3Quality path mix timeline = exportAsWith mp3Quality path $ \out -> do
   (l, r) <- either (ioError . userError) pure (renderTimelineMix mix timeline)
-  pcmWavBits (mixBits mix) out (mixRate mix) [l, r]
+  pcmWavWith dither (mixBits mix) out (mixRate mix) [l, r]
 
 
 
 -- | Process arguments are passed directly (no shell interpolation); existing
 -- outputs are replaced.
 exportAs :: FilePath -> (FilePath -> IO ()) -> IO ()
-exportAs path writeTo = case takeExtension path of
+exportAs = exportAsWith 2
+
+-- | Output extensions audio export accepts.
+audioExtensions :: [String]
+audioExtensions = [".wav", ".mp3", ".flac", ".ogg", ".opus", ".m4a"]
+
+-- | ffmpeg codec arguments for an output extension, given the MP3 VBR
+-- quality; 'Nothing' for WAV (written natively) or unknown extensions.
+encoderArgs :: Int -> String -> Maybe [String]
+encoderArgs mp3Quality extension = case extension of
+  ".mp3" -> Just ["-codec:a", "libmp3lame", "-q:a", show mp3Quality]
+  ".flac" -> Just []
+  ".ogg" -> Just ["-codec:a", "libvorbis", "-q:a", "6"]
+  ".opus" -> Just ["-codec:a", "libopus", "-b:a", "160k"]
+  ".m4a" -> Just ["-codec:a", "aac", "-b:a", "256k"]
+  _ -> Nothing
+
+-- | 'exportAs' with an MP3 VBR quality.
+exportAsWith :: Int -> FilePath -> (FilePath -> IO ()) -> IO ()
+exportAsWith mp3Quality path writeTo = case takeExtension path of
   ".wav" -> writeTo path
-  extension | extension `elem` [".mp3", ".flac"] -> do
+  extension | Just codec <- encoderArgs mp3Quality extension -> do
     executable <- findExecutable "ffmpeg"
-    ffmpeg <- maybe (ioError (userError "MP3/FLAC export requires ffmpeg on PATH")) pure executable
+    ffmpeg <- maybe (ioError (userError (extension ++ " export requires ffmpeg on PATH"))) pure executable
     withSystemTempFile "neo-music.wav" $ \tmp handle -> do
       hClose handle
       writeTo tmp
-      callProcess ffmpeg (["-v", "error", "-y", "-i", tmp] ++
-        (if extension == ".mp3" then ["-codec:a", "libmp3lame", "-q:a", "2"] else []) ++ [path])
-  _ -> ioError (userError "supported extensions: .wav, .mp3, .flac")
+      callProcess ffmpeg (["-v", "error", "-y", "-i", tmp] ++ codec ++ [path])
+  _ -> ioError (userError ("supported extensions: " ++ unwords audioExtensions))
