@@ -1,0 +1,16 @@
+-- "Three Woods": Salamander piano and both Meta guitars.
+-- See acoustic/README.md for preparation, attribution and mapping limitations.
+tempo 96
+tuning 12 at C4
+master rate 44100 bits 24 peak 0.8 tail 1
+reverb none
+sound grand = gain ((0.6 + 0.4 * velocity) * adsr 0.001 0 1 0.4) sampled "acoustic/salamander.sfz"
+sound nylon = gain ((0.45 + 0.55 * velocity) * adsr 0.001 0 1 0.7) sampled "acoustic/meta-nylon-finger.sfz"
+sound steel = gain ((0.45 + 0.55 * velocity) * adsr 0.001 0 1 0.7) sampled "acoustic/meta-steel.sfz"
+instrument piano = grand gain 0.7
+instrument nylon = nylon gain 1 pan -0.3
+instrument steel = steel gain 0.6 pan 0.3
+conductor: _:8 rit 0.8 [_:4]
+piano: vel 0.5 [(0 4 7):4 (-3 0 4):4 (-5 -1 2):4]
+nylon: vel 0.55 [[-12 -5 0 4]:1/2 [-15 -8 -3 0]:1/2]*2 [-17 -10 -5 -1]:1
+steel: _:2 vel 0.65 [7 9 12:2 11 7 4:2 2:2]

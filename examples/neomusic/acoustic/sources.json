@@ -1,0 +1,34 @@
+[
+  {
+    "id": "salamander",
+    "archive": "salamander.tar.gz",
+    "url": "https://codeload.github.com/sfzinstruments/SalamanderGrandPiano/tar.gz/3382bf9496bba2486f5ab0de55a264d1dfc38404",
+    "sha256": "f36bef84632067387909ba03064daee6e81afdea3f93526c4ee56a22e12613ba",
+    "revision": "3382bf9496bba2486f5ab0de55a264d1dfc38404",
+    "sample_count": 480,
+    "license": "CC-BY-3.0",
+    "credit": "Alexander Holm; SFZ reconstruction by kinwie; retuned edition by Markus Fiedler (natural tuning used here)"
+  },
+  {
+    "id": "meta-steel-guitar",
+    "archive": "meta-open-sound-meta-steel-guitar-wav.zip",
+    "url": "https://github.com/facebookincubator/Meta-open-sound/releases/download/meta-steel-guitar-v1.0.0/meta-open-sound-meta-steel-guitar-wav.zip",
+    "sha256": "caaa8a9c07217f4a82d1dfd9f5657c286155464b66bf4dd27797811c2558a909",
+    "version": "meta-steel-guitar-v1.0.0",
+    "sample_count": 375,
+    "license": "CC0-1.0",
+    "credit": "Meta Creative Audio team",
+    "mapping_reference_revision": "251c0be57d5d1b3242b91f53e0cde62ab1cb42d9"
+  },
+  {
+    "id": "meta-nylon-guitar",
+    "archive": "meta-open-sound-meta-nylon-guitar-wav.zip",
+    "url": "https://github.com/facebookincubator/Meta-open-sound/releases/download/meta-nylon-guitar-v1.0.0/meta-open-sound-meta-nylon-guitar-wav.zip",
+    "sha256": "e7fa168b97a72ecc1257917f85cb524fe7c2e1f098dfdcaf8f5c0e29cabe768e",
+    "version": "meta-nylon-guitar-v1.0.0",
+    "sample_count": 348,
+    "license": "CC0-1.0",
+    "credit": "Meta Creative Audio team",
+    "mapping_reference_revision": "251c0be57d5d1b3242b91f53e0cde62ab1cb42d9"
+  }
+]

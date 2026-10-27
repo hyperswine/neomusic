@@ -1,0 +1,10 @@
+-- Meta nylon-string guitar, CC0 recordings. Baseline mapping, not a string simulator.
+-- Run acoustic/prepare.py and set NEOMUSIC_SAMPLES; see acoustic/README.md.
+tempo 100
+tuning 12 at C4
+master rate 44100 bits 24 peak 0.8 tail 1
+reverb none
+sound guitar = gain ((0.45 + 0.55 * velocity) * adsr 0.001 0 1 0.7) sampled "acoustic/meta-nylon.sfz"
+instrument guitar = guitar
+guitar: vel 0.25 [-20 -15 -10 -5]:1/2 vel 0.55 [-1 4 7 12]:1/2
+        vel 0.85 [[4 4 4 4]:1/4 7:1/2 4:1/2] vel 0.6 [(-20 -13 -8 -4 -1 4):3]

@@ -50,8 +50,8 @@ left: (-12 -5):4 (-7 -3):4 (-12 -5):4 (-7 -3):4
 Statements occupy one line, and a line that starts with whitespace continues
 the statement above it; `--` starts a comment. Headers, bindings and voice
 statements can be interleaved, except global tuning must precede instruments.
-A score with more than one part and any tempo change also has a `conductor:`
-line (see tempo, below).
+Tempo can be written in any part, or in a `conductor:` line (see tempo,
+below).
 `tempo` defaults to 120, tuning to 12-EDO at C4, meter to 4 quarter-note beats,
 and the key hint to C major. Instrument declarations are required for voices.
 A `key` or `meter` header affects only the sheet view.
@@ -149,11 +149,13 @@ A `key` or `meter` header affects only the sheet view.
   The written notes never change: these shape the performance only, and
   nested changes multiply.
 
-  **One clock, one owner.** A tempo change acts on everything sounding during
-  its beats, in every part, so the ensemble shares one clock and parts can't
-  drift apart. When a score has more than one part, that clock belongs to a
-  `conductor:` line: ordinary music over rests that carries the tempo and no
-  notes.
+  **One clock, no overlapping owners.** A tempo change acts on everything
+  sounding during its beats, in every part, so the ensemble shares one clock
+  and parts can't drift apart. Tempo may be written in any part, next to the
+  music it shapes; it is hoisted out of the part into that shared clock
+  without moving. A
+  `conductor:` line is a part with no notes, for tempo that belongs to no one
+  part:
 
   ```
   conductor: _:4 rit 2/3 [_:4] speed 2 [speed 2 [_:2]] _:2
@@ -161,18 +163,14 @@ A `key` or `meter` header affects only the sheet view.
   bass:      -12:4 -17:4 -12:2 -12:2
   ```
 
-  The rules, each an error naming the fix:
-  - a conductor contains rests and tempo, never notes;
-  - a document has at most one conductor;
-  - with a conductor, the instrumental parts contain no tempo;
-  - with more than one part, tempo anywhere needs a conductor ("multi-part
-    scores need an explicit conductor: track");
-  - parallel branches may not own overlapping tempo; nesting one change inside
-    another is intentional and multiplies.
-
-  A single-part score may keep its tempo inline, as a shorthand. The
-  conductor's length counts toward the piece's length. It has no instrument
-  declaration, sheet lane or MIDI channel. See
+  There is one rule: no two parts (or two parallel branches of one part) may
+  set the tempo over the same written beats, since their factors would
+  multiply by accident. The error names them and the beats ("right and left
+  both set the tempo over beats 1-3"). Nesting a change inside another, in one
+  part, is intentional and multiplies; a steady `speed 1` owns nothing. A
+  conductor contains rests and tempo, never notes, and its length counts
+  toward the piece's length. It has no instrument declaration, sheet lane or
+  MIDI channel. See `2026-10-22-NEOMUSIC-TEMPO-HOISTING.md`,
   `examples/neomusic/tempo.neomusic`, `examples/neomusic/composition.neomusic`
   and `2026-10-12-NEOMUSIC-TIMEMAP.md`.
 - `glide f [...]` makes each single note slide into the note that directly
@@ -417,11 +415,13 @@ extent and its cycle lengths. `exactSpeedAt` gives the exact combined factor
 at a beat when every node over it is a constant speed, so the reading views
 never round exact tempos through floating point.
 
-`arrange conductor parts` builds a score with one explicit clock owner and
-checks the conductor rules above; an existing score migrates with
-`arrange (conductorOf s) [withoutTempo s]`. `Tempo` remains for whole-score
-and single-part construction, and `flatten` rejects overlapping tempo from
-parallel siblings. `scaleScore` and `reverseScore` stretch and reverse whole
+`ensemble [(name, part)]` combines parts into one score with one clock: each
+part's tempo is hoisted (`conductorOf` for the clock, `withoutTempo` for the
+music) into `clock :||: music`, and `tempoClash` rejects two parts owning the
+same beats; `flatten` applies the same rule to parallel branches.
+`conductorTrack` checks a conductor has no notes, and `arrange conductor parts`
+is `ensemble` with the conductor as a part (`arrange (conductorOf s)
+[withoutTempo s]` still migrates a score). `scaleScore` and `reverseScore` stretch and reverse whole
 scores, tempo included.
 
 `pitchShift`, `level` and `strength` are `Signal`s (`NeoMusic.Signal`,

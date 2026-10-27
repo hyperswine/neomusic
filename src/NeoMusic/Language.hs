@@ -512,15 +512,13 @@ parseDocumentWith assets input = do
       initial = (defaultPerformance, SheetView 4 "C" M.empty True, tuning defaultInstrument, [], [])
       env = Env defs fromPreludeDefs False M.empty []
   (perf,view,_,voices,_) <- foldM (readStatement kinds sounds) initial nonbindings
-  scores <- mapM (\(name,expr) -> evaluate env name expr) [(name,e) | (name,e) <- voices, name /= "conductor"]
-  conductors <- mapM (evaluate env "conductor" . snd) [(name,e) | (name,e) <- voices, name == "conductor"]
-  result <- case conductors of
-    [] -> do
-      unless (length scores <= 1 || all (null . tempoNodes) scores)
-        (Left "multi-part scores need an explicit conductor: track; move tempo out of the instrumental parts")
-      pure (foldr (:||:) (Silence 0) scores)
-    [conductor] -> arrange conductor scores
-    _ -> Left "duplicate conductor track"
+  -- Every line is a part; a conductor line is a part without notes. Tempo
+  -- written anywhere is hoisted into the one shared clock ('ensemble').
+  parts <- mapM (\(name,expr) -> do
+                   part <- evaluate env name expr
+                   checked <- if name == "conductor" then conductorTrack part else pure part
+                   pure (name, checked)) voices
+  result <- ensemble parts
   validate perf result
   pure (Document perf view result)
   where
