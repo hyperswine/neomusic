@@ -36,7 +36,7 @@ on the path; sheet music needs LilyPond.
 |---|---|
 | `src/NeoMusic/` | the library: `Score`, `Signal`, `Language`, `Audio`, `Recording`, `Midi`, `Numeric`, `Sheet`, and the prelude |
 | `app/neo-music` | the command-line renderer for `.neomusic` files |
-| `app/screw-bgm`, `app/screw-anime`, `app/terra-bgm` | scores written against the library directly |
+| `pieces/` | personal pieces written against the library directly (`screw-bgm`, `screw-anime`, `terra-bgm`), a separate package not built by default: `cabal build all --project-file=cabal.project.pieces` |
 | `examples/neomusic/` | example scores, SFZ instrument maps for VSCO 2 CE, Salamander and Meta guitars, and room impulse tooling |
 | `test/` | Hedgehog properties and LilyPond golden files |
 | `docs/` | the dated design record |
