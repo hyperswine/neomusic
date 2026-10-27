@@ -14,8 +14,9 @@ From the repository root:
 
 ```sh
 cabal run neo-music -- check examples/neomusic/twinkle.neomusic
-cabal run neo-music -- play examples/neomusic/twinkle.neomusic -o twinkle.wav
-cabal run neo-music -- play examples/neomusic/twinkle.neomusic -o twinkle.mp3
+cabal run neo-music -- play examples/neomusic/twinkle.neomusic
+cabal run neo-music -- render examples/neomusic/twinkle.neomusic -o twinkle.wav
+cabal run neo-music -- render examples/neomusic/twinkle.neomusic -o twinkle.mp3
 cabal run neo-music -- midi examples/neomusic/twinkle.neomusic -o twinkle.mid
 cabal run neo-music -- sheet examples/neomusic/twinkle.neomusic -o twinkle.html
 cabal run neo-music -- sheet examples/neomusic/twinkle.neomusic -o twinkle.txt
@@ -25,7 +26,9 @@ cabal run neo-music -- staff examples/neomusic/twinkle.neomusic -o twinkle.ly --
 cabal test
 ```
 
-`play` renders a file; it does not open an audio player. WAV synthesis is native.
+`render` writes an audio file. `play` without `-o` renders to a temporary WAV and
+plays it with `afplay` (macOS) or `ffplay`/`aplay` (whichever is on PATH), and
+says so if none is found; `play -o file` behaves like `render`. WAV synthesis is native.
 MP3/FLAC need `ffmpeg` on PATH. `.ly` generation is native; `--pdf` invokes
 `lilypond` on PATH. Source is still saved if LilyPond is missing. Exports overwrite
 the named output. `sheet` and `hybrid` take `--marks` to show gate and curve

@@ -9,25 +9,50 @@ import NeoMusic.Sheet (engrave)
 import qualified NeoMusic.Score as S
 import System.Environment (getArgs, lookupEnv)
 import System.Directory (findExecutable)
-import System.FilePath (dropExtension, takeExtension)
+import System.FilePath (dropExtension, takeExtension, (</>))
+import System.Info (os)
+import System.IO.Temp (withSystemTempDirectory)
+import Data.List (intercalate)
+import Data.Maybe (isJust)
+import NeoMusic.Cli
 import System.Process (callProcess)
 import System.Exit (die)
 
 main :: IO ()
 main = do
   args <- getArgs
-  case args of
-    [command,input,"-o",output] -> run command input output []
-    "sheet":input:"-o":output:flags | flags == ["--marks"] -> run "sheet" input output flags
-    "hybrid":input:"-o":output:flags | flags == ["--marks"] -> run "hybrid" input output flags
-    "staff":input:"-o":output:flags | all (`elem` ["--pdf","--no-numbers"]) flags -> run "staff" input output flags
-    "sheet":input:flags | all (== "--marks") flags -> readDocument input >>= \doc ->
+  invocation <- either die pure (parseArgs args)
+  case invocation of
+    Audio _ input (Just output) -> renderTo input output
+    Audio _ input Nothing -> playNow input
+    Export command input output flags -> run command input output flags
+    SheetStdout input flags -> readDocument input >>= \doc ->
       orDie (numericPage (plain {showMarks = not (null flags)}) (performance doc) (score doc)) >>= putStr
-    ["check",input] -> do
+    Check input -> do
       doc <- readDocument input
       timeline <- orDie (S.render (performance doc) (score doc))
       putStrLn (show (length (A.notes timeline))++" notes, "++show (A.seconds timeline)++" seconds")
-    _ -> die "usage: neo-music {play|midi|sheet|hybrid|staff} song.neomusic -o output [sheet/hybrid: --marks] [staff: --pdf --no-numbers]\n       neo-music check song.neomusic"
+
+renderTo :: FilePath -> FilePath -> IO ()
+renderTo input output = do
+  doc <- readDocument input
+  S.writeAudio output (performance doc) (score doc)
+
+-- | Render to a temporary WAV and play it with the first available player.
+playNow :: FilePath -> IO ()
+playNow input = do
+  found <- mapM (\(name, _) -> (,) name . isJust <$> findExecutable name) (playerCandidates os)
+  let available name = maybe False id (lookup name found)
+  case pickPlayer os available "" of
+    Nothing -> die ("play: no audio player found on PATH (tried "
+      ++ intercalate ", " (map fst (playerCandidates os))
+      ++ "). Install one, or write a file with: neo-music render "++input++" -o out.wav")
+    Just _ -> withSystemTempDirectory "neo-music" $ \dir -> do
+      let wav = dir </> "play.wav"
+      renderTo input wav
+      case pickPlayer os available wav of
+        Just (player, playerArgs) -> callProcess player playerArgs
+        Nothing -> pure ()
 
 -- | A document with the recordings it names, found next to it or under each
 -- directory in NEOMUSIC_SAMPLES (separated by colons).
@@ -48,7 +73,6 @@ run command input output flags = do
       music = score doc
       reading = plain {showMarks = "--marks" `elem` flags}
   case command of
-    "play" -> S.writeAudio output perf music
     "midi" -> orDie (midi perf music) >>= BL.writeFile output
     "sheet" -> case takeExtension output of
       ".txt" -> orDie (numericPage reading perf music) >>= writeFile output
