@@ -12,7 +12,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macos-15 is arm64. macos-latest's SDK (MacOSX27.0) ships .tbd stubs
+        # with arm64e.x1 slices that GHC 9.8's link step rejects ("unknown
+        # architecture"); move to macos-latest once that is fixed.
+        os: [ubuntu-latest, macos-15]
         ghc: ['9.8.4']
     steps:
       - uses: actions/checkout@v4
