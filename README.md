@@ -21,6 +21,8 @@ dependency's version.
 cabal build all
 cabal test
 cabal run neo-music -- check examples/neomusic/twinkle.neomusic
+cabal run neo-music -- play examples/neomusic/twinkle.neomusic    # listen now
+cabal run neo-music -- render examples/neomusic/twinkle.neomusic -o twinkle.flac
 ```
 
 `cabal repl neomusic` loads the library in GHCi. Audio export needs FFmpeg
