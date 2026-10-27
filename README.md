@@ -66,6 +66,7 @@ names a missing recording fails with a message pointing here. Offline tests:
 Listen to [Last Train, Blue Hour](examples/neomusic/audio/last-train-blue-hour.mp3),
 a 2:40 J-pop/jazz piece for Salamander piano and both guitars. Its
 [score and arrangement notes](docs/2026-10-27-LAST-TRAIN-BLUE-HOUR.md) describe the form and rendering.
+Piano: Salamander Grand Piano V3 by Alexander Holm, licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/), via sfzinstruments/SalamanderGrandPiano; samples decoded to WAV and remapped. Guitars: Meta Open Sound (CC0).
 
 ## History
 

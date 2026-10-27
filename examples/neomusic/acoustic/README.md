@@ -94,6 +94,7 @@ not a claim of complete piano or guitar performance modeling.
   smaller SFZ mapping and NeoMusic voice envelope replace the advanced player
   controls. Preserve this attribution when distributing the adaptation or music
   made from these samples, and retain the upstream license with the assets.
+  Short form: Salamander Grand Piano V3 by Alexander Holm, licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/), via sfzinstruments/SalamanderGrandPiano; samples decoded to WAV and remapped.
 - **Meta nylon and steel guitars:** Meta Creative Audio team,
   [Meta Open Sound](https://github.com/facebookincubator/Meta-open-sound),
   **CC0 1.0** instrument recordings. The first-position string layout and velocity
