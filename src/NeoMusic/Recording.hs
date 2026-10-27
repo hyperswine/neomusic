@@ -7,7 +7,7 @@
 -- take it answers to.
 module NeoMusic.Recording
   ( Recording(..), Region(..), SampleSet(..)
-  , readRecording, readSampleSet, parseSfz, findFile, chooseRegions, recordedPitch
+  , readRecording, readSampleSet, parseSfz, findFile, chooseRegions, recordedPitch, missingRecording
   ) where
 
 import Control.Exception (IOException, try)
@@ -243,7 +243,7 @@ readSampleSet dirs path = do
           let sample = map slash (M.findWithDefault "" "default_path" ops ++ M.findWithDefault "" "sample" ops)
           found <- findFile (takeDirectory path) dirs sample
           case found of
-            Nothing -> pure (Left ("recording not found: " ++ sample))
+            Nothing -> pure (Left (missingRecording sample))
             Just file -> fmap shape <$> readRecording file
       pure $ case sequence built of
         Left e -> Left (path ++ ": " ++ e)
@@ -310,3 +310,11 @@ readNote k s = case s of
          _ -> Left (k ++ ": not a note: " ++ s)
   _ | all (\ch -> isDigit ch || ch == '-') s, not (null s) -> Right (read s)
   _ -> Left (k ++ ": not a note: " ++ s)
+
+-- | The error for a recording that is not next to the document or under
+-- NEOMUSIC_SAMPLES, naming the script that fetches the example libraries.
+missingRecording :: FilePath -> String
+missingRecording p = "recording not found: " ++ p
+  ++ " (searched next to the document and in NEOMUSIC_SAMPLES). The example libraries"
+  ++ " (VSCO 2 CE, rooms, Salamander, Meta guitars) are fetched and checksummed by:"
+  ++ " python3 scripts/fetch-samples.py --samples DIR --fetch, then export NEOMUSIC_SAMPLES=DIR"
