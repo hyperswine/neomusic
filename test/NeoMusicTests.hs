@@ -15,7 +15,7 @@ import NeoMusic.Audio
   ( Contour(..), Mix(..), Mod(..), Osc(..), Patch(..), Note(..), Timeline(..), Voice(..), Wave(..)
   , adsr, basicPatch, cutoffHz, defaultMix, expandClassic, hall, hat, kick, modAt, noReverb, noiseSweep, note
   , pcmWav, pcmWavBits, percussive, pianoPatch, pluck, reeseBass, renderTimelineMix, sawPatch, sinePatch, snare
-  , squarePatch, subBass, supersaw, validPatch, validVoice, Room(..) )
+  , squarePatch, subBass, supersaw, validPatch, validVoice, Room(..), Reverb(..), writeTimelineMix )
 import qualified Data.Map.Strict as Map
 import NeoMusic.Recording (Recording(..), Region(..), SampleSet(..), parseSfz, readRecording, readSampleSet)
 import Control.Exception (evaluate)
@@ -358,4 +358,19 @@ neoMusicGroup = Group "NeoMusic audio engine"
       let peak = VU.maximum (VU.map abs (VU.take half cut))
           lastWindow = VU.slice (half + 66) 22 cut              -- the final half millisecond
       assert (VU.maximum (VU.map abs lastWindow) < 0.3 * peak))
+  , ("streamed export equals mastering then writing whole vectors", withTests 1 $ property $ do
+      let notes = [ note (0.1 * fromIntegral k) (220 * (1 + 0.1 * fromIntegral k)) 0.3 (Classic sawPatch) 0.7 1 0 0.5
+                  | k <- [0 .. 9 :: Int] ]
+          timeline = Timeline 1.5 notes
+          mixes = [ (defaultMix 22050) {mixReverb = hall, mixTail = 0.5}
+                  , (defaultMix 22050) {mixReverb = hall {width = 0.4, preDelay = 0.01}, mixBits = 24, mixDrive = 1.5}
+                  , (defaultMix 16000) {mixNormalize = False, mixPeak = 1} ]
+      results <- evalIO $ withSystemTempDirectory "neomusic" $ \dir -> mapM (\(k, m) -> do
+        let a = dir </> ("stream" ++ show k ++ ".wav"); b = dir </> ("whole" ++ show k ++ ".wav")
+        writeTimelineMix a m timeline
+        (l, r) <- either fail pure (renderTimelineMix m timeline)
+        pcmWavBits (mixBits m) b (mixRate m) [l, r]
+        x <- BL.readFile a; y <- BL.readFile b
+        pure (BL.length x > 44, x == y)) (zip [0 :: Int ..] mixes)
+      results === replicate 3 (True, True))
   ]
