@@ -18,12 +18,14 @@ default view, and ordinary prelude definitions over a small core.
    inside a sounding note. A phrase curve at a given written position must not
    depend on note segmentation. Test ramps, swing, gates, pitch and level, and
    agreement between MIDI and audio. Sound envelopes in `Mod` retain seconds.
-3. **Tempo ownership.** Keep one ensemble clock, owned explicitly by a conductor
-   track (user decision, 2026-10-21). Combining independent instrumental parts
-   must not multiply their tempo instructions accidentally. Preserve nested
-   tempo composition within the conductor and exact beat onsets. Migrate the
-   examples and canonical source; reject ambiguous ownership with an actionable
-   diagnostic. Numeric and staff views must describe the effective clock.
+3. **Tempo ownership.** Keep one ensemble clock, with no two parts setting
+   tempo over the same written beats. The conductor can own tempo explicitly,
+   but tempo may also live in the part it shapes. Combining independent
+   instrumental parts must not multiply their tempo instructions accidentally.
+   Preserve nested tempo composition within one part and exact beat onsets.
+   Migrate the examples and canonical source; reject ambiguous ownership with
+   an actionable diagnostic. Numeric and staff views must describe the
+   effective clock.
 4. **Pitch identity.** Make pitched/unpitched interpretation an instrument
    property. Exporters must not classify a voice by examining an oscillator,
    filter or bend graph. A transposed pitched voice must export normally;
@@ -109,19 +111,23 @@ bass:     -12:4 -17:4 -12:2 -12:2
 ```
 
 The conductor uses ordinary music expressions over rests. It contributes
-written extent and tempo, but no instrumental events. It may not contain notes,
-and a document has at most one conductor track. Instrumental parts alongside
-an explicit conductor must contain no tempo nodes. Multi-part documents with
-inline tempo must migrate it to a conductor; a single-part document retains
-inline tempo as a convenient shorthand.
+written extent and tempo, but no instrumental events, and it may not contain
+notes. It is optional: tempo may instead live beside the music it shapes and
+is then hoisted into the shared clock without moving. Multiple conductor
+lines are ordinary parts, with the same rest-only requirement.
 
-At the Haskell boundary, `arrange conductor parts` checks the same ownership.
-Existing scores can migrate with `arrange (conductorOf s) [withoutTempo s]`.
-`Tempo` remains available for whole-score and single-part construction. The
-shared validator rejects overlapping tempo nodes from parallel siblings;
-intentional nested nodes still multiply. This prevents accidental factor
+The one ownership rule is that no two parts (or two parallel branches of one
+part) may set tempo other than 1 over the same written beats. Intentional
+nesting within one part still multiplies. This prevents accidental factor
 multiplication without silently deduplicating legitimate nested composition.
-Whole-score `scaleScore` and `reverseScore` now live in the core API.
+At the Haskell boundary, `ensemble` combines named parts and `arrange
+conductor parts` treats the conductor as one of them. Existing scores can
+migrate with `arrange (conductorOf s) [withoutTempo s]`; `Tempo` remains
+available for whole-score and single-part construction. Whole-score
+`scaleScore` and `reverseScore` now live in the core API.
+
+This supersedes the mandatory-conductor contract recorded here on
+2026-10-21; see [the tempo-hoisting decision](2026-10-22-NEOMUSIC-TEMPO-HOISTING.md).
 
 For nonoverlapping tempo, reading views retain the familiar swing/hold/rit
 marks. With overlapping nested factors, numeric and staff views describe the

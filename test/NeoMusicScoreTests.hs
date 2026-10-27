@@ -1003,6 +1003,10 @@ scoreGroup = Group "NeoMusic score and views"
       sort (map show (A.notes ti)) === sort (map show (A.notes tc))
       A.seconds ti === A.seconds tc
       numeric plain (score inline) === numeric plain (score conducted)
+      sheets <- traverse (\doc -> evalEither (engrave (performance doc) (sheetView doc) (score doc))) [inline, conducted]
+      case sheets of
+        [inlineSheet, conductedSheet] -> inlineSheet === conductedSheet
+        _ -> failure
       -- Parts may each own different spans, alongside a conductor; a steady
       -- speed 1 owns nothing.
       _ <- compile (headers ++ "conductor: _ hold 2 [_]\nright: speed 3/4 [0] 2\nleft: 4 4 rit 1/2 [4 4]\n")

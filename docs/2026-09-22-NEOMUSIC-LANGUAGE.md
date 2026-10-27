@@ -149,10 +149,11 @@ A `key` or `meter` header affects only the sheet view.
   The written notes never change: these shape the performance only, and
   nested changes multiply.
 
-  **One clock, one owner.** A tempo change acts on everything sounding during
-  its beats, in every part, so the ensemble shares one clock and parts can't
-  drift apart. Tempo may be written in any part, next to the music it shapes;
-  it is hoisted out of the part into that shared clock without moving. A
+  **One clock, no overlapping owners.** A tempo change acts on everything
+  sounding during its beats, in every part, so the ensemble shares one clock
+  and parts can't drift apart. Tempo may be written in any part, next to the
+  music it shapes; it is hoisted out of the part into that shared clock
+  without moving. A
   `conductor:` line is a part with no notes, for tempo that belongs to no one
   part:
 
