@@ -6,5 +6,7 @@ master rate 44100 bits 24 peak 0.8 tail 1
 reverb none
 sound grand = gain ((0.6 + 0.4 * velocity) * adsr 0.001 0 1 0.4) sampled "acoustic/salamander.sfz"
 instrument piano = grand
-piano: vel 0.2 [0 4 7 12]:1/2 vel 0.5 [(0 4 7):2]
-       vel 0.8 [[0 0 0 0]:1/4 4:1/2 7:1/2] vel 0.6 [(-12 0 4 7):3]
+-- Repeated notes humanized (audition 2026-10-29): vary crosses Salamander's
+-- velocity layers, so repeats select different recordings, not one replay.
+piano: humanize 3 [vel 0.2 [0 4 7 12]:1/2 vel 0.5 [(0 4 7):2]
+       vel 0.8 [[0 0 0 0]:1/4 4:1/2 7:1/2] vel 0.6 [(-12 0 4 7):3]]

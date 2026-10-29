@@ -113,7 +113,11 @@ mapping output and rejection of corrupt archives. They need no audio assets.
 
 The scores `piano-recorded.neomusic`, `guitar-nylon-recorded.neomusic`,
 `guitar-steel-recorded.neomusic` and `acoustic-trio.neomusic` exercise attacks,
-dynamics, repeated notes, chords and releases. Automated render evidence and
+dynamics, repeated notes, chords and releases. They apply `humanize` with one
+seed per part (see the [audition note](../../../docs/2026-10-29-NEOMUSIC-AUDITION.md)):
+repeated notes then select different recordings on the piano and steel maps,
+and on the nylon auto map the written velocities keep variation inside one
+technique band. Automated render evidence and
 remaining listening work are recorded in the dated integration note in `docs/`.
 
 For a longer arrangement, try [Last Train, Blue Hour](../last-train-blue-hour.neomusic)
