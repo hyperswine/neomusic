@@ -1,0 +1,167 @@
+-- "Emberfall": a one-minute metal-orchestral sketch in the vein of Bury the
+-- Light (Casey Edwards): a clean steel guitar alone in a hall, a synth-chug
+-- drop with kit and timpani, a gallop verse, an anthemic D-minor chorus, a
+-- neo-classical run, and a final chorus that ritards into a held chord.
+-- Composed 2026-10-29 to exercise the tempo-hoisting, humanize and recorded-
+-- instrument work; see docs/2026-10-29-NEOMUSIC-AUDITION.md and the dated
+-- piece note it points to.
+-- Needs NEOMUSIC_SAMPLES holding VSCO 2 CE (CC0), the Meta steel guitar (CC0)
+-- and the Jack Lyons room (OpenAIR, Audiolab, University of York, CC BY 4.0):
+-- examples/neomusic/vsco/make-sfz.py, acoustic/prepare.py, rooms/make-room.py.
+
+tempo 168
+tuning 12 at C4
+meter 4
+
+-- The orchestra: VSCO 2 Community Edition recordings under release envelopes.
+sound ens  = gain ((0.5 + 0.5 * velocity) * adsr 0.01 0 1 0.9) sampled "vsco/strings.sfz"
+sound vln  = gain ((0.5 + 0.5 * velocity) * adsr 0.01 0 1 0.9) sampled "vsco/violins.sfz"
+sound hrn  = gain ((0.5 + 0.5 * velocity) * adsr 0.02 0 1 0.5) sampled "vsco/horn.sfz"
+sound harp = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1.5) sampled "vsco/harp.sfz"
+sound timp = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1.5) sampled "vsco/timpani.sfz"
+
+-- The metal, synthesized: the library has no distorted guitar, so the chug is
+-- a dark stack of detuned saws muted short, and the lead a singing saw unison.
+sound chug from basic
+  osc saw unison 4 detune 26
+  osc square gain 0.3
+  amp velocity * adsr 0.002 0.15 0.5 0.05
+  cutoff filter 260 0.6 (adsr 0.001 0.09 0.2 0.04) 2.2 1.3
+  resonance 0.3  width 0.5
+sound solo from basic
+  osc saw unison 3 detune 16
+  osc square up 12 gain 0.22
+  amp velocity * adsr 0.01 0.25 0.8 0.3
+  cutoff filter 1100 0.4 (adsr 0.02 0.35 0.45 0.2) 2.6 1.4
+  resonance 0.2  width 0.4
+sound crash from basic
+  osc noise unison 2
+  amp velocity * adsr 0.001 1.3 0 1.6
+  highpass 5200  width 0.7
+
+-- The intro's clean voice: the auditioned Meta steel guitar.
+sound clean = gain ((0.45 + 0.55 * velocity) * adsr 0.001 0 1 0.7) sampled "acoustic/meta-steel.sfz"
+
+-- The Jack Lyons Concert Hall, central seats (see rooms/make-room.py).
+reverb space "rooms/jack-lyons/jack-lyons-lp2-stereo.wav" wet 0.45 predelay 0
+master rate 44100 bits 24 peak 0.8 tail 4
+
+instrument clean = clean gain 2.4 pan -0.25 send 0.5
+instrument ens   = ens gain 0.9 send 0.6
+instrument vln   = vln gain 1.0 pan 0.15 send 0.55
+instrument hrn   = hrn gain 0.8 pan -0.1 send 0.55
+instrument harp  = harp gain 2.6 pan 0.3 send 0.5
+instrument timp  = timp gain 3.2 send 0.5
+instrument lead  = solo gain 1.0 send 0.45
+instrument chug  = chug gain 0.75 send 0.3
+instrument bass  = reeseBass gain 0.9 send 0.2
+instrument kick  = kick gain 1.15 pitch unpitched
+instrument snare = snare gain 0.75 pitch unpitched
+instrument hat   = hat gain 0.3 pitch unpitched
+instrument crash = crash gain 0.45 pitch unpitched send 0.6
+
+-- Voicings around middle C, and the progressions they play in.
+Dm = (-10 -3 2 5)
+Bb = (-14 -7 2 5)
+F  = (-7 0 5 9)
+C  = (-12 -5 4 7)
+Gm = (-17 -10 -2 2)
+A  = (-15 -8 1 4)
+pDm  = pedal [(-22 -15 -10):4]                 -- power chords, one per bar
+pBb  = pedal [(-26 -19 -14):4]
+pF   = pedal [(-19 -12 -5):4]
+pC   = pedal [(-24 -17 -10):4]
+pGm  = pedal [(-17 -10 -3):4]
+pA   = pedal [(-15 -8 -1):4]
+
+DmArp = [-10 -3 2 5 9 5 2 -3]:1/2             -- the intro's clean arpeggios
+BbArp = [-14 -7 2 6 10 6 2 -7]:1/2
+
+ch  #r = gate 0.85 [[r]*16]:1/4                -- a bar of sixteenth chug
+gal #r = gate 0.8 [[r:1/2 r:1/4 r:1/4]*4]      -- a bar of gallop
+bs  #r = [[r]*8]:1/2                           -- a bar of eighth-note bass
+
+oD = gate 0.5 [[2 5 10 5]*2]:1/2               -- staccato violin ostinatos
+oB = gate 0.5 [[-2 2 5 2]*2]:1/2
+oC = gate 0.5 [[0 4 7 4]*2]:1/2
+oA = gate 0.5 [[-3 1 4 1]*2]:1/2
+
+tuneA = 14:1 14:1 12:1/2 14:1/2 17:1           -- the chorus melody, first half
+        17:2 14:2  16:2 14:2  12:2 14:2
+tuneB = 14:1 14:1 12:1/2 14:1/2 17:1           -- and second half
+        19:2 17:2  21:2 19:1 17:1  16:3 14:1
+tuneHi = 14:1 14:1 12:1/2 14:1/2 17:1          -- the last-time ending
+        19:2 17:2  21:1 19:1 16:2
+
+run1 = [26 24 21 19 17 14 12 9]:1/4            -- the neo-classical descent
+run2 = [14 12 10 9 7 5 4 2]:1/4
+run3 = [2 0 -2 -3 -5 -7 -8 -10]:1/4
+run4 = [-10 -8 -7 -5 -3 -2 0 2]:1/4
+
+kd  = [-27 _ -27 _]                            -- drum bars
+kd2 = [-27 _ -27 -27]
+kg  = [[-27:1/2 _:1/2 -27:1/2 -27:1/2]*2]
+sb  = [_ _ 0 _]
+sfill = [_ _ 0 [0 0 0 0]:1/2]
+h8  = [[0]*8]:1/2
+
+-- No conductor line: tempo lives in the parts that shape it and hoists to
+-- the one shared clock - an accel into the final chorus under the chug's
+-- gallop, and the ritard in the lead's own last bar (everyone else's final
+-- notes stretch with the slowing clock; only one part may write the tempo).
+
+-- Intro (bars 1-4): the guitar alone, strings entering under a timpani roll.
+clean: humanize 31 [vel 0.62 [DmArp DmArp BbArp cresc 0.55 0.78 [DmArp]]]
+ens:   _:8 cresc 0.45 0.7 [Dm:8]
+       vel 0.55 [(-22 -10 -3):16 (-26 -14 -7):8 (-24 -12 -5):8]
+       vel 0.5 [Dm:4 Bb:4 C:4 A:4 Dm:4 Bb:4 C:4 A:4]
+       vel 0.7 [Dm:4 Bb:4 F:4 C:4 Dm:4 Bb:4 Gm:4 A:4]
+       cresc 0.5 0.8 [Dm:4 Gm:4 A:4 A:4]
+       vel 0.85 [Dm:4 Bb:4 F:4 C:4 Dm:4 Bb:4 A:4 Dm:4]
+vln:   _:16 vel 0.6 [oD oD oD oD oB oB oC oC]
+       vel 0.5 [oD oB oC oA oD oB oC oA]
+       vel 0.8 [tuneA tuneB]
+       vel 0.65 [run1 run2] _:12
+       vel 0.85 [tuneA tuneHi 14:4]
+hrn:   _:16 vel 0.6 [(-22 -15):16 (-26 -19):8 (-24 -17):8] _:32
+       vel 0.75 [(-22 -15):4 (-26 -19):4 (-19 -12):4 (-24 -17):4
+       (-22 -15):4 (-26 -19):4 (-17 -10):4 (-15 -8):4]
+       cresc 0.5 0.85 [(-15 -8):8 (-15 -8):8]
+       vel 0.85 [(-22 -15):4 (-26 -19):4 (-19 -12):4 (-24 -17):4
+       (-22 -15):4 (-26 -19):4 (-15 -8):4 (-22 -15):4]
+harp:  _:112 humanize 23 [vel 0.7 [run1 run2 run3 run4]]
+timp:  _:12 cresc 0.3 0.9 [[-22:1/4]*16]
+       [-22:2 -15:1 -17:1  [-22:2 _:1 -22:1]*3  [-17:2 _:1 -17:1]*2 [-12:2 _:1 -12:1]*2]
+       [-22:2 _:2 -15:2 _:2]*4
+       vel 0.8 [-22:2 _:2]*7 [-15:2 _:2]
+       _:10 cresc 0.4 0.9 [[-22:1/4]*8] [[-22:1/4]*16]
+       vel 0.9 [-22:2 -15:1 -17:1 [-22:2 _:2]*6 dim 1 0.3 [-22:4]]
+
+-- The metal: drop (5-12), verse gallop (13-20), power-chord choruses (21-28,
+-- 33-40), the accel bar into the last one. The lead sings only in choruses.
+chug:  _:16 vel 0.8 [[ch -22]*4 [ch -26]*2 [ch -24]*2]
+       vel 0.8 [gal -22 gal -26 gal -24 gal -27]*2
+       vel 0.85 [pDm pBb pF pC pDm pBb pGm pA]
+       [-22 _:3]*3 accel 1.05 [gal -22]
+       vel 0.9 [pDm pBb pF pC pDm pBb pA (-22 -15 -10):4]
+bass:  _:16 [[bs -22]*4 [bs -26]*2 [bs -24]*2]
+       [[bs -22 bs -26 bs -24 bs -27]*2]
+       vel 0.8 [-22:4 -26:4 -19:4 -24:4 -22:4 -26:4 -17:4 -15:4]
+       [-22:4 -22:4 -22:4 [bs -22]]
+       vel 0.85 [-22:4 -26:4 -19:4 -24:4 -22:4 -26:4 -15:4 -22:4]
+lead:  _:80 humanize 17 [vel 0.85 [tuneA tuneB]] _:16
+       humanize 17 [vel 0.9 [tuneA tuneHi rit 0.8 [hold 2 [14:4]]]]
+
+-- The kit (5-12, 13-20, 21-28, the build, the final drive).
+kick:  _:16 [kd kd kd kd kd2 kd2 kd2 kd2]
+       [kg kg kg kg kg kg kg kg]
+       [kd2 kd2 kd2 kd2 kd2 kd2 kd2 kd2]
+       [[-27]*8 [-27:1/2]*16]
+       [kd2 kd2 kd2 kd2 kd2 kd2 [[-27]*16]:1/4 [[-27]*16]:1/4]
+snare: _:16 [sb sb sb sb sb sb sb sfill]
+       [sb sb sb sb sb sb sb sb]
+       [sb sb sb sb sb sb sb sfill]
+       _:8 cresc 0.4 0.95 [[0:1/2]*8] cresc 0.6 1 [[0:1/4]*16]
+       [sb sb sb sb sb sb sfill 0:4]
+hat:   _:16 [h8]*8 [h8]*8 [h8]*8 _:16 [h8]*8
+crash: _:16 0:2 _:62 0:2 _:46 0:2 _:26 0:4

@@ -79,6 +79,9 @@ Listen to [Last Train, Blue Hour](examples/neomusic/audio/last-train-blue-hour.m
 a 2:40 J-pop/jazz piece for Salamander piano and both guitars. Its
 [score and arrangement notes](docs/2026-10-27-LAST-TRAIN-BLUE-HOUR.md) describe the form and rendering.
 Piano: Salamander Grand Piano V3 by Alexander Holm, licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/), via sfzinstruments/SalamanderGrandPiano; samples decoded to WAV and remapped. Guitars: Meta Open Sound (CC0).
+For a heavier wall, [Emberfall](examples/neomusic/audio/emberfall.mp3) is a
+one-minute metal-orchestral piece for VSCO 2 CE, synthesized guitars and kit;
+[its note](docs/2026-10-29-EMBERFALL.md) records what writing it surfaced.
 
 ## History
 

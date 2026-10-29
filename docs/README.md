@@ -46,3 +46,4 @@ Pages written before 2026-10-21 came from HaskPlayground, where they moved into 
 | 2026-10-27 | [NEOMUSIC-ACOUSTIC-INSTRUMENTS](2026-10-27-NEOMUSIC-ACOUSTIC-INSTRUMENTS.md) | first Salamander and Meta guitar integration, setup, render evidence and remaining limits |
 | 2026-10-27 | [LAST-TRAIN-BLUE-HOUR](2026-10-27-LAST-TRAIN-BLUE-HOUR.md) | original 72-bar J-pop/jazz acoustic trio, MP3 audition and score |
 | 2026-10-29 | [NEOMUSIC-AUDITION](2026-10-29-NEOMUSIC-AUDITION.md) | audition pass on the recorded instruments: measurements, humanized examples, what still needs ears |
+| 2026-10-29 | [EMBERFALL](2026-10-29-EMBERFALL.md) | a metal-orchestral minute: where the system stands after tempo hoisting and the audition |
