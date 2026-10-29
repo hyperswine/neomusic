@@ -11,6 +11,8 @@ instrument piano = grand gain 0.7
 instrument nylon = nylon gain 1 pan -0.3
 instrument steel = steel gain 0.6 pan 0.3
 conductor: _:8 rit 0.8 [_:4]
-piano: vel 0.5 [(0 4 7):4 (-3 0 4):4 (-5 -1 2):4]
-nylon: vel 0.55 [[-12 -5 0 4]:1/2 [-15 -8 -3 0]:1/2]*2 [-17 -10 -5 -1]:1
-steel: _:2 vel 0.65 [7 9 12:2 11 7 4:2 2:2]
+-- Humanized per part (audition 2026-10-29), one seed each; the finger-only
+-- nylon map keeps dynamics from changing technique.
+piano: humanize 3 [vel 0.5 [(0 4 7):4 (-3 0 4):4 (-5 -1 2):4]]
+nylon: humanize 5 [vel 0.55 [[-12 -5 0 4]:1/2 [-15 -8 -3 0]:1/2]*2 [-17 -10 -5 -1]:1]
+steel: _:2 humanize 9 [vel 0.65 [7 9 12:2 11 7 4:2 2:2]]
