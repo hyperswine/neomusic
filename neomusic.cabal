@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name:           neomusic
-version:        0.1.0.0
+version:        0.2.0.0
 synopsis:       Algebraic music notation: .neomusic scores to audio, MIDI and piano sheets
 description:    Please see the README on GitHub at <https://github.com/hyperswine/neomusic#readme>
 homepage:       https://github.com/hyperswine/neomusic#readme

@@ -87,6 +87,18 @@ is a downtempo piece where a blooming pad, a sub bass and a melody halo
 support Salamander piano and VSCO 2 CE strings; [its note](docs/2026-10-30-UNDERTOW.md)
 records the blending techniques and their measured depths.
 
+## Acceptance
+
+- **v0.2.0.0 - Undertow (2026-10-30), passed.** A full piece in which every
+  synthetic voice sits inside the mix instead of on it - slow envelopes,
+  drifting filter LFOs, the pad layered inside the strings' own sound - with
+  the blend depths measured by muting and subtracting: the melody halo
+  16.5 dB under the tune, the inner pad about 6 dB inside the strings.
+  Techniques and depths: [docs/2026-10-30-UNDERTOW.md](docs/2026-10-30-UNDERTOW.md).
+  [Emberfall](docs/2026-10-29-EMBERFALL.md), the metal-orchestral piece whose
+  synths read as pasted on, set the test; see also the
+  [recorded-instrument audition](docs/2026-10-29-NEOMUSIC-AUDITION.md) it followed.
+
 ## History
 
 NeoMusic was split out of [HaskPlayground](https://github.com/hyperswine/HaskPlayground)
