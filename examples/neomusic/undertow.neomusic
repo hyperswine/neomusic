@@ -1,0 +1,152 @@
+-- "Undertow": a downtempo minute and a half where the synths are part of the
+-- track, not on top of it. Recorded instruments (Salamander piano, VSCO 2 CE
+-- strings, violins, cello pizzicato, harp) carry the music; every synthetic
+-- voice supports - a pad that blooms over seconds and swells across whole
+-- sections, a sub bass felt more than heard, a quiet triangle-synth halo
+-- doubling the violin melody an octave up, noise "breaths" into transitions.
+-- The craft brief (2026-10-30, after Emberfall): slow envelopes, filter LFO
+-- drift, velocity opening tone not just level, layering inside the orchestra,
+-- humanized and swung like the players.
+-- Needs NEOMUSIC_SAMPLES with Salamander, VSCO 2 CE and the Jack Lyons room:
+-- scripts/fetch-samples.py, then examples/neomusic/acoustic/prepare.py.
+
+tempo 92
+tuning 12 at C4
+meter 4
+
+-- The players: recordings under envelopes that let them ring.
+sound pfelt = gain ((0.6 + 0.4 * velocity) * adsr 0.001 0 1 1.2) sampled "acoustic/salamander.sfz"
+sound vlnS  = gain ((0.5 + 0.5 * velocity) * adsr 0.01 0 1 0.9) sampled "vsco/violins.sfz"
+sound pizzS = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1) sampled "vsco/cello-pizz.sfz"
+sound harpS = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1.5) sampled "vsco/harp.sfz"
+
+-- The supporters, each with the gradualness built in:
+-- The pad never attacks; it swells (2.6 s in, 4 s out), its cutoff drifts on
+-- a 0.13 Hz sine and opens with velocity, so a crescendo changes its tone.
+sound padS from basic
+  osc saw unison 5 detune 14
+  osc triangle gain 0.45
+  amp (0.22 + 0.78 * velocity) * adsr 2.6 3 0.7 4
+  cutoff filter 280 0.2 (lfo sine 0.13) 2.6 0.6
+  resonance 0.08  highpass 85  width 0.85
+-- The orchestra's body fuses with it: one sound, strings plus half a pad.
+sound ensS = gain ((0.5 + 0.5 * velocity) * adsr 0.01 0 1 0.9) sampled "vsco/strings.sfz" + gain 0.5 padS
+-- The bass: sine-led with a whisper of saw, a sub an octave down, soft-kneed.
+sound bassS from basic
+  osc sine
+  osc saw gain 0.3
+  osc sine up -12 gain 0.6
+  amp (0.45 + 0.55 * velocity) * adsr 0.03 0.2 0.8 0.5
+  cutoff filter 130 0.15 (adsr 0.15 0.5 0.45 0.3) 1.3 0.9
+  resonance 0.04  width 0.15
+-- The halo: a triangle unison a tenth as loud as the melody it doubles,
+-- slow vocal attack, vibrato applied in the score, cutoff breathing at 0.21 Hz.
+sound haloS from basic
+  osc triangle unison 3 detune 9
+  osc sine gain 0.5
+  amp velocity * adsr 0.45 1.4 0.6 1.6
+  cutoff filter 650 0.25 (lfo sine 0.21) 2.2 0.5
+  resonance 0.05  width 0.55
+-- The breath: filtered noise that opens as it swells, into each transition.
+sound breathS from basic
+  osc noise unison 2
+  amp velocity * adsr 2 0.6 0.25 2.8
+  cutoff filter 190 0 (adsr 2.4 0.9 0.35 1.6) 4.2 0
+  resonance 0.35  highpass 90  width 0.9
+
+-- One hall for everything; synths sit deeper in it than the piano.
+reverb space "rooms/jack-lyons/jack-lyons-lp2-stereo.wav" wet 0.5 predelay 0
+master rate 44100 bits 24 peak 0.8 tail 5
+
+instrument piano  = pfelt gain 1.6 pan -0.15 send 0.5
+instrument pad    = padS gain 0.55 send 0.7
+instrument bass   = bassS gain 0.85 send 0.2
+instrument ens    = ensS gain 1.0 send 0.65
+instrument vln    = vlnS gain 1.0 pan 0.2 send 0.6
+instrument halo   = haloS gain 0.4 pan 0.35 send 0.6
+instrument pizz   = pizzS gain 1.3 pan -0.3 send 0.45
+instrument harp   = harpS gain 2.4 pan 0.3 send 0.55
+instrument kick   = kick gain 0.95 pitch unpitched
+instrument snare  = snare gain 0.5 pitch unpitched
+instrument hat    = hat gain 0.3 pitch unpitched
+instrument breath = breathS gain 0.45 send 0.7
+
+-- G minor. Voicings around middle C; the arpeggio pattern is root, fifth,
+-- colour, octave, tenth - the piano's rolling figure.
+Gm = (-14 -7 2 5)
+Eb = (-9 -5 3 7)
+Bb = (-14 -10 2 5)
+F  = (-19 -12 -3 0)
+Cm = (-12 -9 -5 0)
+D  = (-10 -6 -3 2)
+
+GmArp = [-17 -10 -2 2 5 2 -2 -10]:1/2
+EbArp = [-21 -14 -5 3 7 3 -5 -14]:1/2
+BbArp = [-14 -7 2 5 10 5 2 -7]:1/2
+FArp  = [-19 -12 -3 0 4 0 -3 -12]:1/2
+CmArp = [-12 -9 -5 0 3 0 -5 -9]:1/2
+DArp  = [-10 -6 -3 2 6 2 -3 -6]:1/2
+
+i1 = (-17 -10 -2):4                          -- the intro's held dyads and runs
+i2 = [-10 -7 -2 2 5 2 -2 -7]:1/2
+i3 = (-21 -14 -5):4
+i4 = [-14 -10 -5 -2 2 -2 -5 -10]:1/2
+
+mel = 14:2 12:1 10:1                         -- the chorus tune, G minor
+       7:2 10:2  14:1 10:1 9:1 7:1  9:3 7:1
+       14:2 12:1 10:1  15:2 14:2  10:2 7:1 5:1  6:2 2:2
+
+bp #r = [r:1.5 r:0.5 r:2]                    -- the bass's loping pulse
+pp #r = [r r r r r r r r]:1/2                -- the pizzicato eighth-note pulse
+kA2 = [-27:1/2 _ _ _ -27:1/2 _ _]            -- drums: sparse, then moving
+kA  = [-27:1/2 _ _ -27:1/2 -27:1/2 _ _ _]
+kC  = [-27:1/2 _ _ -27:1/2 -27:1/2 _ _ -27:1/2]
+sb  = [_ 0 _ 0]
+h8  = [[0]*8]:1/2
+
+-- One tempo writer, at the end, in the piano's own last bar.
+
+-- Piano (bars 1-32): the anchor - alone, rolling, then stepping back for the
+-- strings, then returning, then the held G minor that ends it.
+piano: humanize 7 [i1 i2 i3 i4
+        [GmArp EbArp BbArp FArp]*2
+        [Eb:4 Bb:4 F:4 Gm:4 Eb:4 Bb:4 Cm:4 D:4]
+        [GmArp EbArp BbArp FArp GmArp EbArp CmArp DArp]
+        i2 (-21 -14 -9):4 (-17 -10 -2):4 rit 0.8 [hold 2 [(-17 -14 -10 -5 -2 2):4]]]
+
+-- The pad, alone only before the strings exist (bars 5-12), one long swell.
+pad: _:16 cresc 0.22 0.55 [[(-17 -14 -10):4 (-21 -14 -9):4 (-14 -7 -2):4 (-19 -15 -12):4]*2]
+
+-- The bass: whole roots from bar 9, the pulse from the lift, root under the end.
+bass: humanize 11 [_:32 [-17:4 -21:4 -14:4 -19:4]
+        [bp -21 bp -14 bp -19 bp -17 bp -21 bp -14 bp -24 bp -10]
+        [bp -17 bp -21 bp -14 bp -19 bp -17 bp -21 bp -24 bp -10]
+        _:8 -17:8]
+
+-- Strings with the pad fused in (from bar 13), carrying harmony to the end.
+ens: _:48 cresc 0.42 0.68 [Eb:4 Bb:4 F:4 Gm:4 Eb:4 Bb:4 Cm:4 D:4]
+        vel 0.72 [Gm:4 Eb:4 Bb:4 F:4 Gm:4 Eb:4 Cm:4 D:4]
+        dim 0.65 0.3 [(-17 -10 -2):16]
+
+-- Violins: a quiet pre-echo of the tune late in the lift, then the tune.
+vln: _:48 _:16 vel 0.42 [14:2 12:1 10:1 7:2 10:2] vel 0.75 [mel] _:16
+
+-- The halo: the tune an octave up, under a tenth of gain, singing vibrato.
+halo: _:80 vibrato 0.09 [vel 0.5 [octave mel]] _:16
+
+-- Cello pizzicato: the heartbeat under the lift and the tune.
+pizz: humanize 13 [_:48
+        [pp -21 pp -14 pp -19 pp -17 pp -21 pp -14 pp -24 pp -10]
+        [pp -17 pp -21 pp -14 pp -19 pp -17 pp -21 pp -24 pp -10] _:16]
+
+-- Harp: rising pickups into the lift and the tune, a slow sparkle out.
+harp: humanize 19 [_:44 [14 17 19 22]:1/2 _:30 [14 17 19 22 24 26]:1/2 _:31
+        [22 26 29 31]:1 _:14]
+
+-- The kit: a heartbeat, a backbeat that arrives late, hats that swing.
+kick: humanize 29 [_:16 [kA2]*4 [kA]*8 [kC]*8 _:16]
+snare: humanize 31 [_:48 vel 0.45 [sb]*8 vel 0.6 [sb]*8 _:16]
+hat: _:32 vel 0.3 [h8]*4 vel 0.35 swing 0.58 [h8]*8 vel 0.45 swing 0.6 [h8]*8 _:16
+
+-- The breaths: swells into the lift, the tune, and the ending.
+breath: _:44 vel 0.65 [0:4] _:28 vel 0.75 [0:4] _:28 vel 0.6 [0:8] _:12

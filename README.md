@@ -82,6 +82,10 @@ Piano: Salamander Grand Piano V3 by Alexander Holm, licensed CC BY 3.0 (https://
 For a heavier wall, [Emberfall](examples/neomusic/audio/emberfall.mp3) is a
 one-minute metal-orchestral piece for VSCO 2 CE, synthesized guitars and kit;
 [its note](docs/2026-10-29-EMBERFALL.md) records what writing it surfaced.
+For synths that sit inside the track instead of on it, [Undertow](examples/neomusic/audio/undertow.mp3)
+is a downtempo piece where a blooming pad, a sub bass and a melody halo
+support Salamander piano and VSCO 2 CE strings; [its note](docs/2026-10-30-UNDERTOW.md)
+records the blending techniques and their measured depths.
 
 ## History
 
