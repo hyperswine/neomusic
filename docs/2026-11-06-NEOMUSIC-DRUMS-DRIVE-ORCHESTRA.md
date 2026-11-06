@@ -206,12 +206,15 @@ properties), as do the three Python suites.
 Their balances were set by measuring each part's level alone, not by ear. In
 the high-gain piece the two guitars, the lead, the bass and the whole kit
 each sit within 4 dB of one another in mean level. The owner has since
-listened to `rock-kit` and `orchestra-tutti` and found them acceptable (same
-day); `high-gain` has no verdict yet.
+listened (same day): first to `rock-kit` and `orchestra-tutti`, found
+acceptable, and then to the rest, accepting the quality and the synthesis.
+That covers the recorded kit, the amplifier (`bus`, `drive` and the cabinet
+filters) as heard in `high-gain` and Emberfall, and the orchestra maps.
 
 ## 6. Open
 
-- A listening verdict on `high-gain`, and on the amplifier's voicing.
+- Nothing is waiting on a listening verdict: the owner accepted the quality
+  and the synthesis on 2026-11-06 (section 5).
 - Done the same day, at the owner's request: Emberfall plays the recorded
   guitars and kit, and Undertow the recorded kit. Each piece's page has a
   dated section with the levels before and after. The guitar map reaches A1

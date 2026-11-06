@@ -117,6 +117,7 @@ then. The design is in
   in about 20 s.
 - **MIDI.** The piece now exports to MIDI, since each drum declares its key
   (`pitch 36` and so on, from 2026-11-05).
-- **Not judged by ear yet.** The levels are measurements. Whether the drive's
-  voicing suits the piece, and whether short notes stand in well enough for
-  palm mutes in the drop, needs listening. The audition MP3 is the new render.
+- **Listened to and accepted.** The levels were set by measurement; the owner
+  then listened to the new render (the audition MP3) the same day and accepted
+  its quality and the synthesis, the drive's voicing and the short notes
+  standing in for palm mutes included.
