@@ -75,3 +75,48 @@ What the piece surfaced, in the order it bit:
 
 Render cost: about 75 s for the minute, single pass, 1.5 GB of recordings
 consulted through the header-lazy loader.
+
+## 2026-11-06: recorded guitars and kit
+
+The two gaps this page named are closed, at the owner's request: the score now
+plays a recorded guitar through a drive and a recorded kit. What it says above
+about saw patches and the built-in kit describes the piece as it was until
+then. The design is in
+[2026-11-06-NEOMUSIC-DRUMS-DRIVE-ORCHESTRA](2026-11-06-NEOMUSIC-DRUMS-DRIVE-ORCHESTRA.md).
+
+- **Guitars.** The chug and the lead are the FreePats direct-recorded guitar
+  (CC0) through `drive` on a `bus`, so a power chord is driven whole. The one
+  chug part is played by two guitars, left and right: the recording's takes
+  rotate, so they are two performances. Only the left one writes the accel,
+  by the one-clock rule. The riff goes down to A1, so the guitar map was
+  extended two semitones below the library's own lowest key.
+- **Kit.** Kick, snare, closed hi-hat and crash are Big Rusty Drums (CC0).
+  The kick ends with its note, so the last chorus's sixteenth double kicks do
+  not pile up; the crash fades over five seconds. The drum lines are
+  untouched: a fixed recording ignores the steps the synthesized kick needed.
+- **Balance.** Each new part's gain was set from its level alone against the
+  part it replaced, then the guitars and lead were adjusted until the section
+  arc matched. Measured the same way before and after (mean level per
+  section, whole bars):
+
+  | Section | Before | After |
+  |---|---|---|
+  | intro (bars 1-4) | -32.5 dB | -31.9 dB |
+  | drop (5-12) | -18.6 dB | -17.6 dB |
+  | verse (13-20) | -18.3 dB | -17.5 dB |
+  | chorus (21-28) | -16.0 dB | -15.4 dB |
+  | bridge (29-32) | -17.6 dB | -16.8 dB |
+  | final (33-40) | -15.3 dB | -15.1 dB |
+
+  The peak is -1.9 dBFS both times. (These "before" figures differ a little
+  from the ones above, which were taken over other spans.) The intro has no
+  guitars or kit, so its 0.6 dB is the master's scaling alone; against that,
+  every section is within 0.4 dB of where it sat. The chorus still lifts
+  about 2 dB over the verse.
+- **Length and cost.** 67.9 s where it was 64.5 s (the crash's tail), rendered
+  in about 20 s.
+- **MIDI.** The piece now exports to MIDI, since each drum declares its key
+  (`pitch 36` and so on, from 2026-11-05).
+- **Not judged by ear yet.** The levels are measurements. Whether the drive's
+  voicing suits the piece, and whether short notes stand in well enough for
+  palm mutes in the drop, needs listening. The audition MP3 is the new render.

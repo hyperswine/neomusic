@@ -62,7 +62,8 @@ class Maps(unittest.TestCase):
     def test_guitar_covers_its_range_at_every_velocity(self):
         rs = regions(HERE / 'guitar-direct.sfz')
         self.assertEqual(len(rs), 120)
-        for key in range(35, 87):
+        self.assertFalse([r for r in rs if int(r['lokey']) < 33 or int(r['hikey']) > 86])
+        for key in range(33, 87):
             here = [r for r in rs if int(r['lokey']) <= key <= int(r['hikey'])]
             self.assertTrue(tiles([(int(r['lovel']), int(r['hivel'])) for r in here], 1, 127), f'key {key}')
             for span in {(r['lovel'], r['hivel']) for r in here}:

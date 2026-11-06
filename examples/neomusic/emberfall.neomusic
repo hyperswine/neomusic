@@ -1,13 +1,16 @@
 -- "Emberfall": a one-minute metal-orchestral sketch in the vein of Bury the
--- Light (Casey Edwards): a clean steel guitar alone in a hall, a synth-chug
+-- Light (Casey Edwards): a clean steel guitar alone in a hall, a high-gain
 -- drop with kit and timpani, a gallop verse, an anthemic D-minor chorus, a
 -- neo-classical run, and a final chorus that ritards into a held chord.
 -- Composed 2026-10-29 to exercise the tempo-hoisting, humanize and recorded-
 -- instrument work; see docs/2026-10-29-NEOMUSIC-AUDITION.md and the dated
 -- piece note it points to.
--- Needs NEOMUSIC_SAMPLES holding VSCO 2 CE (CC0), the Meta steel guitar (CC0)
--- and the Jack Lyons room (OpenAIR, Audiolab, University of York, CC BY 4.0):
--- examples/neomusic/vsco/make-sfz.py, acoustic/prepare.py, rooms/make-room.py.
+-- Since 2026-11-06 the guitars and the kit are recordings (they were saw
+-- patches and the built-in kit): docs/2026-11-06-NEOMUSIC-DRUMS-DRIVE-ORCHESTRA.md.
+-- Needs NEOMUSIC_SAMPLES holding VSCO 2 CE, the Meta steel guitar, Big Rusty
+-- Drums and the FreePats direct guitar (all CC0) and the Jack Lyons room
+-- (OpenAIR, Audiolab, University of York, CC BY 4.0): scripts/fetch-samples.py,
+-- or vsco/make-sfz.py, acoustic/prepare.py, rock/prepare.py, rooms/make-room.py.
 
 tempo 168
 tuning 12 at C4
@@ -20,24 +23,23 @@ sound hrn  = gain ((0.5 + 0.5 * velocity) * adsr 0.02 0 1 0.5) sampled "vsco/hor
 sound harp = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1.5) sampled "vsco/harp.sfz"
 sound timp = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1.5) sampled "vsco/timpani.sfz"
 
--- The metal, synthesized: the library has no distorted guitar, so the chug is
--- a dark stack of detuned saws muted short, and the lead a singing saw unison.
-sound chug from basic
-  osc saw unison 4 detune 26
-  osc square gain 0.3
-  amp velocity * adsr 0.002 0.15 0.5 0.05
-  cutoff filter 260 0.6 (adsr 0.001 0.09 0.2 0.04) 2.2 1.3
-  resonance 0.3  width 0.5
-sound solo from basic
-  osc saw unison 3 detune 16
-  osc square up 12 gain 0.22
-  amp velocity * adsr 0.01 0.25 0.8 0.3
-  cutoff filter 1100 0.4 (adsr 0.02 0.35 0.45 0.2) 2.6 1.4
-  resonance 0.2  width 0.4
-sound crash from basic
-  osc noise unison 2
-  amp velocity * adsr 0.001 1.3 0 1.6
-  highpass 5200  width 0.7
+-- The metal: a guitar recorded straight from its pickups, through an
+-- amplifier. `bus di` is every note of the instrument summed, so the drive
+-- takes a chord whole; a high-pass before it keeps the low strings tight, and
+-- a high-pass and low-passes after it stand for the cabinet.
+sound di   = gain ((0.55 + 0.45 * velocity) * adsr 0.002 0 1 0.04) sampled "rock/guitar-direct.sfz"
+sound chug = gain 0.12 lowpass (hz 5200) 0.2 lowpass (hz 3600) 0.35 highpass (hz 100)
+             drive 40 highpass (hz 220) bus di
+sound solo = gain 0.25 lowpass (hz 4600) 0.3 highpass (hz 160)
+             drive 25 highpass (hz 320) bus di
+
+-- The kit: Big Rusty Drums, each drum as recorded on every key. The kick ends
+-- with its note, so the double kicks of the last chorus do not pile up, and
+-- the crash fades over five seconds; the others ring out as recorded.
+sound kickS  = gain (adsr 0.001 0 1 0.15) sampled "rock/kick.sfz"
+sound snareS = sampled "rock/snare.sfz"
+sound hatS   = sampled "rock/hat-closed.sfz"
+sound crashS = gain (adsr 0.001 0 1 5) sampled "rock/crash.sfz"
 
 -- The intro's clean voice: the auditioned Meta steel guitar.
 sound clean = gain ((0.45 + 0.55 * velocity) * adsr 0.001 0 1 0.7) sampled "acoustic/meta-steel.sfz"
@@ -52,13 +54,14 @@ instrument vln   = vln gain 1.0 pan 0.15 send 0.55
 instrument hrn   = hrn gain 0.8 pan -0.1 send 0.55
 instrument harp  = harp gain 2.6 pan 0.3 send 0.5
 instrument timp  = timp gain 3.2 send 0.5
-instrument lead  = solo gain 1.0 send 0.45
-instrument chug  = chug gain 0.75 send 0.3
+instrument lead  = solo gain 2.8 send 0.45
+instrument chugL = chug gain 2.0 pan -0.7 send 0.2
+instrument chugR = chug gain 2.0 pan 0.7 send 0.2
 instrument bass  = reeseBass gain 0.9 send 0.2
-instrument kick  = kick gain 1.15 pitch 36
-instrument snare = snare gain 0.75 pitch 38
-instrument hat   = hat gain 0.3 pitch 42
-instrument crash = crash gain 0.45 pitch 49 send 0.6
+instrument kick  = kickS gain 1.7 send 0.1 pitch 36
+instrument snare = snareS gain 0.85 send 0.25 pitch 38
+instrument hat   = hatS gain 0.55 send 0.1 pitch 42
+instrument crash = crashS gain 1.6 pitch 49 send 0.6
 
 -- Voicings around middle C, and the progressions they play in.
 Dm = (-10 -3 2 5)
@@ -139,11 +142,15 @@ timp:  _:12 cresc 0.3 0.9 [[-22:1/4]*16]
 
 -- The metal: drop (5-12), verse gallop (13-20), power-chord choruses (21-28,
 -- 33-40), the accel bar into the last one. The lead sings only in choruses.
-chug:  _:16 vel 0.8 [[ch -22]*4 [ch -26]*2 [ch -24]*2]
-       vel 0.8 [gal -22 gal -26 gal -24 gal -27]*2
-       vel 0.85 [pDm pBb pF pC pDm pBb pGm pA]
-       [-22 _:3]*3 accel 1.05 [gal -22]
-       vel 0.9 [pDm pBb pF pC pDm pBb pA (-22 -15 -10):4]
+-- Two guitars play the one part, left and right: the takes rotate, so they
+-- are two performances. Only the left one writes the accel.
+riffs  = _:16 vel 0.8 [[ch -22]*4 [ch -26]*2 [ch -24]*2]
+         vel 0.8 [gal -22 gal -26 gal -24 gal -27]*2
+         vel 0.85 [pDm pBb pF pC pDm pBb pGm pA]
+         [-22 _:3]*3
+finale = vel 0.9 [pDm pBb pF pC pDm pBb pA (-22 -15 -10):4]
+chugL: riffs accel 1.05 [gal -22] finale
+chugR: riffs gal -22 finale
 bass:  _:16 [[bs -22]*4 [bs -26]*2 [bs -24]*2]
        [[bs -22 bs -26 bs -24 bs -27]*2]
        vel 0.8 [-22:4 -26:4 -19:4 -24:4 -22:4 -26:4 -17:4 -15:4]

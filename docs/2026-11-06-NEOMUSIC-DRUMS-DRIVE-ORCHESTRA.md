@@ -113,7 +113,8 @@ the top of the band are reduced less, and a cabinet's low-pass removes them.
 
 **The guitar: FreePats Electric Guitar FSBS (direct)** (CC0, 77 MB): a Fender
 recorded straight into an instrument input, 19 pitches, two strengths in the
-lower range and four takes of each, keys 35 to 86. It is a raw signal and is
+lower range and four takes of each, keys 33 to 86 (the library's map stops at
+35; its lowest recording is played two semitones further down). It is a raw signal and is
 meant for an amplifier. The amplifier here is a high-pass, the drive, and a
 high-pass and two low-passes for the cabinet.
 
@@ -202,17 +203,19 @@ properties), as do the three Python suites.
 - `examples/neomusic/orchestra-tutti.neomusic`: a twelve-bar chorale for the
   new instruments, woodwinds, then brass, then everyone with the percussion.
 
-Their balances were set by measuring each part's level alone, not by ear:
-nobody has listened to them yet. In the high-gain piece the two guitars, the
-lead, the bass and the whole kit each sit within 4 dB of one another in mean
-level. That is a starting point for a listening pass, which this round did not
-have.
+Their balances were set by measuring each part's level alone, not by ear. In
+the high-gain piece the two guitars, the lead, the bass and the whole kit
+each sit within 4 dB of one another in mean level. The owner has since
+listened to `rock-kit` and `orchestra-tutti` and found them acceptable (same
+day); `high-gain` has no verdict yet.
 
 ## 6. Open
 
-- A listening pass on the three scores, and on the amplifier's voicing.
-- Emberfall and Undertow still play the synthesized kit and guitars. Swapping
-  the recorded ones in is a line per instrument, and is the owner's call.
+- A listening verdict on `high-gain`, and on the amplifier's voicing.
+- Done the same day, at the owner's request: Emberfall plays the recorded
+  guitars and kit, and Undertow the recorded kit. Each piece's page has a
+  dated section with the levels before and after. The guitar map reaches A1
+  for Emberfall's riff (the library stops at B1).
 - A recorded cabinet, a bass guitar (Karoryfer's are CC0), a brushed kit
   (Swirly Drums, CC0) and a choir remain as candidates.
 - The takes counter is shared by every note at a pitch, across instruments.

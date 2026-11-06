@@ -7,8 +7,10 @@
 -- The craft brief (2026-10-30, after Emberfall): slow envelopes, filter LFO
 -- drift, velocity opening tone not just level, layering inside the orchestra,
 -- humanized and swung like the players.
--- Needs NEOMUSIC_SAMPLES with Salamander, VSCO 2 CE and the Jack Lyons room:
--- scripts/fetch-samples.py, then examples/neomusic/acoustic/prepare.py.
+-- Since 2026-11-06 the kit is a recording (it was the built-in presets): a
+-- soft kick, brushes on the snare and a closed hi-hat from Big Rusty Drums.
+-- Needs NEOMUSIC_SAMPLES with Salamander, VSCO 2 CE, Big Rusty Drums and the
+-- Jack Lyons room: scripts/fetch-samples.py.
 
 tempo 92
 tuning 12 at C4
@@ -54,6 +56,14 @@ sound breathS from basic
   cutoff filter 190 0 (adsr 2.4 0.9 0.35 1.6) 4.2 0
   resonance 0.35  highpass 90  width 0.9
 
+-- The kit: Big Rusty Drums, each drum as recorded on every key and to the end
+-- of its recording. How hard a note is played chooses among recordings made
+-- that softly, so these quiet parts are quiet playing, not loud playing
+-- turned down.
+sound kickS  = sampled "rock/kick.sfz"
+sound brushS = sampled "rock/snare-brush.sfz"
+sound hatS   = sampled "rock/hat-closed.sfz"
+
 -- One hall for everything; synths sit deeper in it than the piano.
 reverb space "rooms/jack-lyons/jack-lyons-lp2-stereo.wav" wet 0.5 predelay 0
 master rate 44100 bits 24 peak 0.8 tail 5
@@ -66,9 +76,9 @@ instrument vln    = vlnS gain 1.0 pan 0.2 send 0.6
 instrument halo   = haloS gain 0.4 pan 0.35 send 0.6
 instrument pizz   = pizzS gain 1.3 pan -0.3 send 0.45
 instrument harp   = harpS gain 2.4 pan 0.3 send 0.55
-instrument kick   = kick gain 0.95 pitch 36
-instrument snare  = snare gain 0.5 pitch 38
-instrument hat    = hat gain 0.3 pitch 42
+instrument kick   = kickS gain 1.35 send 0.15 pitch 36
+instrument snare  = brushS gain 3 send 0.3 pitch 38
+instrument hat    = hatS gain 0.55 send 0.15 pitch 42
 instrument breath = breathS gain 0.45 send 0.7
 
 -- G minor. Voicings around middle C; the arpeggio pattern is root, fifth,

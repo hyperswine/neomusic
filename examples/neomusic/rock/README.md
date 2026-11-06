@@ -63,9 +63,10 @@ hi-hat that closes when its note ends: write it as long as it stays open.
 
 ## The guitar
 
-`guitar-direct.sfz` covers keys 35 to 86 (B1 to D6) from 19 recorded pitches,
+`guitar-direct.sfz` covers keys 33 to 86 (A1 to D6) from 19 recorded pitches,
 with a softer layer below velocity 93 in the lower range and four takes of
-each. It follows the key and stops with the note. It is a raw instrument
+each. Upstream stops at B1; the lowest recording (C2) is played two semitones
+further down here, for riffs in low tunings. It follows the key and stops with the note. It is a raw instrument
 signal: play it through a drive on a bus, so a chord's notes are driven
 together, and filters for the cabinet.
 
@@ -87,7 +88,7 @@ players, since the takes rotate; `humanize` each with its own seed.
   library's player also scales each layer by velocity. There are no choke
   groups: an envelope on the voice chokes (above).
 - **Guitar:** the upstream map picks a take at random; here takes rotate. Its
-  0.2 s release is left to the voice.
+  0.2 s release is left to the voice. Its lowest key is A1, not B1.
 
 ## Sources and credits
 
