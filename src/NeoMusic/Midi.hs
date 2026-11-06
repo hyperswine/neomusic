@@ -1,7 +1,7 @@
 -- | Strict 12-TET SMF type 1 view. No microtonal pitch rounding.
 module NeoMusic.Midi (midi, midiPitch, tempoChanges) where
 
-import Control.Monad (unless, when)
+import Control.Monad (unless)
 import Data.Bits ((.|.))
 import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Builder
@@ -46,7 +46,10 @@ midi perf score = do
   changes <- tempoChangesWith lagOf perf score
   lanes <- concat <$> mapM (instrumentLanes lagOf es) names
   unless (length lanes <= 15) (Left "MIDI needs more than 15 pitched channels for instruments, overlapping unisons and curved notes")
-  tracks <- mapM (makeTrack ticks end) (zip lanes ([0..8]++[10..15]))
+  pitchedTracks <- mapM (makeTrack ticks end) (zip lanes ([0..8]++[10..15]))
+  drums <- concat <$> mapM (percussionNotes lagOf es) names
+  drumTracks <- if null drums then pure [] else (:[]) <$> makeDrumTrack ticks end (retrigger (sortOn noteOn drums))
+  let tracks = pitchedTracks ++ drumTracks
   conductor <- track (ticks end) [(ticks at, [0xff,0x51,3] ++ bytes3 micros) | (at, micros) <- changes]
   pure $ toLazyByteString (string8 "MThd" <> word32BE 6 <> word16BE 1
     <> word16BE (fromIntegral (length tracks+1)) <> word16BE (fromInteger division)
@@ -54,14 +57,35 @@ midi perf score = do
   where
     instrumentLanes lagOf es name = do
       i <- maybe (Left "missing instrument") Right (M.lookup name (instruments perf))
-      when (pitchIdentity i == Unpitched)
-        (Left "unpitched instruments need an explicit MIDI percussion mapping")
-      notes <- concat <$> mapM (convert lagOf i) [e | e <- es, instrument e == name]
-      -- A separate channel prevents one unison's note-off cutting another
-      -- short, and pitch bend and expression act on a whole channel, so a
-      -- curved note shares its channel only with notes that overlap it under
-      -- exactly the same curves (a chord's tones).
-      pure (foldl place [] (sortOn noteOn notes))
+      case pitchIdentity i of
+        Unpitched -> Left "unpitched instruments need an explicit MIDI percussion mapping"
+        Percussion _ -> pure []
+        Pitched -> do
+          notes <- concat <$> mapM (convert lagOf i) [e | e <- es, instrument e == name]
+          -- A separate channel prevents one unison's note-off cutting another
+          -- short, and pitch bend and expression act on a whole channel, so a
+          -- curved note shares its channel only with notes that overlap it under
+          -- exactly the same curves (a chord's tones).
+          pure (foldl place [] (sortOn noteOn notes))
+    percussionNotes lagOf es name = do
+      i <- maybe (Left "missing instrument") Right (M.lookup name (instruments perf))
+      case pitchIdentity i of
+        Percussion key -> pure
+          [ MidiNote on (on + dur (event e) * gate (event e)) key (max 1 (round (127 * vel (event e)))) (event e)
+          | e <- es, instrument e == name, not (null (pitches (event e))), vel (event e) > 0
+          , let on = onset e + lagOf e ]
+        _ -> pure []
+    -- On GM channel 10 (index 9), retrigger a repeated drum key cleanly before the new hit.
+    retrigger [] = []
+    retrigger (n0 : more) =
+      let nextSame = [noteOn n1 | n1 <- more, noteKey n1 == noteKey n0, noteOn n1 > noteOn n0]
+          off = foldr min (noteOff n0) nextSame
+      in n0 {noteOff = max (noteOn n0) off} : retrigger more
+    makeDrumTrack ticks total notes =
+      let events = sortOn (\(t,priority,_) -> (t,priority)) $ concat
+            [ [(ticks (noteOn n),3::Int,[0x99,noteKey n,noteVel n]), (ticks (noteOff n),0,[0x89,noteKey n,0])]
+            | n <- notes ]
+      in track (ticks total) ((0,[0xc9,0]) : [(t,bytes) | (t,_,bytes) <- events])
     place [] n0 = [[n0]]
     place (lane:lanes) n0
       | all (fits n0) lane = (n0:lane):lanes

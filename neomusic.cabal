@@ -13,17 +13,20 @@ license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
     README.md
-    docs/2026-09-22-NEOMUSIC-LANGUAGE.md
-    docs/2026-10-21-NEOMUSIC-COMPOSITION.md
-    docs/2026-10-24-NEOMUSIC-PIANO-AND-GUITARS.md
-    docs/2026-10-27-NEOMUSIC-ACOUSTIC-INSTRUMENTS.md
-    docs/2026-10-27-LAST-TRAIN-BLUE-HOUR.md
+    docs/*.md
     examples/neomusic/*.neomusic
     examples/neomusic/audio/*.mp3
     examples/neomusic/acoustic/*.sfz
     examples/neomusic/acoustic/*.py
     examples/neomusic/acoustic/*.json
     examples/neomusic/acoustic/README.md
+    examples/neomusic/rock/*.sfz
+    examples/neomusic/rock/*.py
+    examples/neomusic/rock/*.json
+    examples/neomusic/rock/README.md
+    examples/neomusic/vsco/*.sfz
+    examples/neomusic/vsco/*.py
+    examples/neomusic/rooms/*.py
     examples/neomusic/samples.lock.json
     scripts/*.py
     test/golden/neomusic/*.ly

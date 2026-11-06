@@ -6,15 +6,19 @@
 
 Libraries (pick with --only; default all):
   vsco      VSCO 2 Community Edition (CC0), the files examples/neomusic/vsco/*.sfz
-            name, extracted to SAMPLES/VSCO-2-CE/ (about 2.3 GB download)
+            name (the whole orchestra), extracted to SAMPLES/VSCO-2-CE/ (about
+            2.3 GB download)
   rooms     the OpenAIR Jack Lyons Concert Hall impulse response (CC BY 4.0),
             made stereo by examples/neomusic/rooms/make-room.py
   acoustic  Salamander piano and Meta guitars, through
             examples/neomusic/acoustic/prepare.py --fetch (about 1.8 GB)
+  rock      Big Rusty Drums and the FreePats direct electric guitar (both CC0),
+            through examples/neomusic/rock/prepare.py --fetch (about 0.7 GB)
 
 Every download and every extracted file is checked against SHA-256 values in
-examples/neomusic/samples.lock.json. Python 3 standard library only; the rooms
-and acoustic steps also run their own scripts (acoustic needs ffmpeg).
+examples/neomusic/samples.lock.json. Python 3 standard library only; the rooms,
+acoustic and rock steps also run their own scripts (acoustic and rock need
+ffmpeg; rock also needs bsdtar or 7z).
 Use --archive-dir to keep downloads somewhere reusable; without --fetch a
 missing archive is an error and no network is used.
 """
@@ -130,26 +134,36 @@ def acoustic(samples, archives, fetch):
     subprocess.run(command, check=True)
 
 
+def rock(samples, archives, fetch):
+    command = [sys.executable, str(EXAMPLES / 'rock' / 'prepare.py'), '--samples', str(samples),
+               '--archive-dir', str(archives)]
+    if fetch:
+        command.append('--fetch')
+    subprocess.run(command, check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     default = os.environ.get('NEOMUSIC_SAMPLES')
     parser.add_argument('--samples', default=default, required=default is None,
                         help='directory to fill (default: $NEOMUSIC_SAMPLES)')
     parser.add_argument('--archive-dir', help='download cache (default: SAMPLES/downloads)')
-    parser.add_argument('--only', action='append', choices=['vsco', 'rooms', 'acoustic'],
+    parser.add_argument('--only', action='append', choices=['vsco', 'rooms', 'acoustic', 'rock'],
                         help='fetch just this library (repeatable)')
     parser.add_argument('--fetch', action='store_true', help='download missing archives')
     args = parser.parse_args()
     samples = Path(args.samples).expanduser().resolve()
     archives = Path(args.archive_dir).expanduser().resolve() if args.archive_dir else samples / 'downloads'
     lock = json.loads(LOCK.read_text())
-    chosen = args.only or ['vsco', 'rooms', 'acoustic']
+    chosen = args.only or ['vsco', 'rooms', 'acoustic', 'rock']
     if 'vsco' in chosen:
         vsco(lock, samples, archives, args.fetch)
     if 'rooms' in chosen:
         rooms(lock, samples, archives, args.fetch)
     if 'acoustic' in chosen:
         acoustic(samples, Path(args.archive_dir).expanduser().resolve() if args.archive_dir else None, args.fetch)
+    if 'rock' in chosen:
+        rock(samples, archives, args.fetch)
     print(f'Ready: export NEOMUSIC_SAMPLES={samples}')
 
 

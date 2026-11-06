@@ -703,7 +703,9 @@ scoreGroup = Group "NeoMusic score and views"
         , "      (bandpass (hz 450) 1.2 tone saw + bandpass (hz 1600) 1 tone saw)"
         , "     + gain (0.08 * adsr 0.005 0.06 0 0.05) (highpass (hz 3000) noise)))"
         , "sound harp = gain velocity lowpass (hz 3500 + 0.4 * key) 0 plucked 2.5 0.6"
-        , "sound bright = pan -0.5 pluck" ]))
+        , "sound bright = pan -0.5 pluck"
+        , "sound grit = drive 2.5 tone saw"
+        , "sound amp = gain 0.5 lowpass (hz 4000) 0.3 drive 30 bus grit" ]))
       let saw = A.Tone A.SawWave
           violins = A.Gain (A.Velocity A.:* A.adsr 0.08 0.3 0.85 0.4) (A.Unison 4 14 0.8
             (A.Bend (A.K 0.1 A.:* A.Then 0.25 (A.K 0) (A.Lfo A.SineWave 5.5))
@@ -714,6 +716,8 @@ scoreGroup = Group "NeoMusic score and views"
       M.lookup "harp" sounds === Just harp
       M.lookup "ensemble" sounds === Just (A.Gain (A.K 0.5) violins A.:& harp)
       M.lookup "bright" sounds === Just (A.Pan (A.K (-0.5)) (A.Classic A.pluck))
+      M.lookup "grit" sounds === Just (A.Drive (A.K 2.5) saw)
+      M.lookup "amp" sounds === Just (A.Gain (A.K 0.5) (A.Lowpass (A.cutoffHz 4000) 0.3 (A.Drive (A.K 30) (A.Bus (A.Drive (A.K 2.5) saw)))))
       -- A voice plays, and its notes go to MIDI and the staff as pitched notes.
       doc <- evalEither (parseDocument (unlines
         [ "tempo 120", "tuning 12 at C4", "sound harp = gain (velocity * adsr 0.001 0 1 1) plucked 2 0.5"
@@ -730,6 +734,11 @@ scoreGroup = Group "NeoMusic score and views"
         , "sound a = gain 1 nowhere\nright: 0"
         , "sound a = tone saw\nsound b from a amp 1\nright: 0"
         , "sound noise = tone saw\nright: 0"
+        , "sound drive = tone saw\nright: 0"
+        , "sound bus = tone saw\nright: 0"
+        , "sound a = gain velocity bus tone saw\nright: 0"
+        , "sound a = bus bus tone saw\nright: 0"
+        , "sound a = drive -1 tone saw\nright: 0"
         , "sound a = pan 2 tone saw\nright: 0"
         , "sound a = tone saw +\nright: 0" ]
       -- The last parses, but a noise voice is unpitched, so it has no MIDI note.
@@ -965,14 +974,28 @@ scoreGroup = Group "NeoMusic score and views"
       mapM_ (\voice -> do
         let pitched = performanceFor Pitched voice
             unpitched = performanceFor Unpitched voice
+            mapped = performanceFor (Percussion 36) voice
         _ <- evalEither (midi pitched note)
         _ <- evalEither (engrave pitched view note)
+        _ <- evalEither (midi mapped note)
+        _ <- evalEither (engrave mapped view note)
         assert (isLeft (midi unpitched note) && isLeft (engrave unpitched view note))) voices
       d <- evalEither (parseDocument "sound oct = bend 12 tone sine\ninstrument a = oct pitch pitched\na: 0\n")
       _ <- evalEither (midi (performance d) (score d))
       u <- evalEither (parseDocument "instrument a = sine pitch unpitched\na: 0\n")
       assert (isLeft (midi (performance u) (score u)))
-      assert (isLeft (parseDocument "instrument a = sine pitch maybe\na: 0\n")))
+      -- Explicit MIDI/staff percussion mappings emit GM channel 10 (0x99/0x89) at the mapped key.
+      kit <- evalEither (parseDocument "instrument kick = kick pitch 36 staff bass\ninstrument snare = snare pitch D2 staff bass\nkick: -27 _\nsnare: _ 0\n")
+      kitMidi <- evalEither (midi (performance kit) (score kit))
+      assert (BS.pack [0,0x99,36,127,1,0x89,36,0,0,0x99,38,127,1,0x89,38,0] `BS.isInfixOf` BL.toStrict kitMidi)
+      kitSheet <- evalEither (engrave (performance kit) (sheetView kit) (score kit))
+      assert ("c,4" `isInfixOf` kitSheet && "d,4" `isInfixOf` kitSheet && not ("0 = " `isInfixOf` kitSheet))
+      assert (isLeft (validate (performanceFor (Percussion 128) A.Noise) note))
+      assert (isLeft (engrave (performanceFor (Percussion 20) A.Noise) view note))
+      mapM_ (assert . isLeft . parseDocument)
+        [ "instrument a = sine pitch maybe\na: 0\n"
+        , "instrument a = sine pitch 128\na: 0\n"
+        , "instrument a = sine pitch -1\na: 0\n" ])
   , ("one conductor owns the ensemble clock", withTests 1 $ property $ do
       let headers = header ++ "instrument left = piano staff bass\n"
           voices = "right: 0\nleft: 4\n"

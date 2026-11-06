@@ -91,7 +91,11 @@ instance Monoid Score where mempty = Silence 0
 
 -- | How score pitches are interpreted by notation/MIDI. This is declared by
 -- the instrument, never guessed from its synthesis graph.
-data PitchIdentity = Pitched | Unpitched deriving (Eq, Show)
+data PitchIdentity
+  = Pitched
+  | Unpitched
+  | Percussion Int  -- ^ unpitched instrument mapped to this MIDI percussion key (0..127) on GM channel 10
+  deriving (Eq, Show)
 
 data Instrument = Instrument
   { tuning :: Tuning, timbre :: A.Voice, gain :: Double, pan :: Double, send :: Double
@@ -551,6 +555,9 @@ validate performance score = do
     unless (finite (gain i) && gain i >= 0) (Left (context "gain must be finite and nonnegative"))
     unless (finite (pan i) && abs (pan i) <= 1) (Left (context "pan must be within -1..1"))
     unless (finite (send i) && send i >= 0 && send i <= 1) (Left (context "reverb send must be within 0..1"))
+    case pitchIdentity i of
+      Percussion k -> unless (k >= 0 && k <= 127) (Left (context "percussion key must be within MIDI 0..127"))
+      _ -> pure ()
   forM_ (lineNames score) $ \name ->
     unless (M.member name (instruments performance)) (Left ("unknown instrument: " ++ name))
   where

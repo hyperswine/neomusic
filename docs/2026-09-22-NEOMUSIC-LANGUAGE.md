@@ -254,12 +254,13 @@ Built-in sounds: `basic`, `piano`, `sine`, `saw`, `square`, `pluck`,
 that equals it exactly (a test checks), so that file is what they mean. `piano`
 is a simple synthesized piano-like sound, not a sampled acoustic instrument.
 Instrument attributes are `staff` (`treble`/`bass`), `gain` (nonnegative), `pan`
-(-1..1), `send` (0..1, the reverb send), and `pitch pitched` (the default) or
-`pitch unpitched`. Pitch identity is declared, never guessed from the sound:
-audio ignores it, and MIDI and the staff refuse an unpitched instrument until
-a percussion mapping exists. Declare drums `pitch unpitched`
-(`instrument kick = kick pitch unpitched`); a pitched sound with a bend or
-noise in it stays pitched.
+(-1..1), `send` (0..1, the reverb send), and `pitch pitched` (the default),
+`pitch unpitched`, or `pitch KEY` (a MIDI key `0..127` or note name like `C2`
+for GM channel 10 percussion and staff position). Pitch identity is declared,
+never guessed from the sound: audio ignores it, MIDI and the staff refuse an
+unmapped `pitch unpitched` instrument, and `pitch KEY` maps every hit to that
+percussion key regardless of the score step (`instrument kick = kick pitch 36`).
+A pitched sound with a bend or noise in it stays pitched.
 
 **Sounds.** `sound NAME [from BASE]` defines a sound, starting from another
 sound in the file or a built-in (without `from`, from `basic`). Its parts,
@@ -291,6 +292,8 @@ shapers, each shaper acting on the voice after it (see `2026-10-14-NEOMUSIC-VOIC
 | `bend MOD v` | everything in `v` this many semitones higher; inside it, `key` is the raised pitch |
 | `lowpass MOD r v`, `highpass MOD v` | filters; cutoffs in octaves above C4 (`hz f`, `key`...), resonance 0..1 |
 | `bandpass MOD w v` | a resonance `w` octaves wide, unity at its centre: a body or formant |
+| `drive MOD v` | tanh waveshaper (0 leaves `v` unchanged; > 0 drives harder, normalised to +-1) |
+| `bus v` | every note of the instrument playing `v`, summed; the shapers outside act on the sum |
 | `unison n cents width v` | `n` copies of `v`, detuned across `cents`, spread across the stereo `width` |
 | `pan MOD v` | stereo position, -1..1 |
 | `a + b` | mixed |
@@ -314,7 +317,28 @@ How long a voice sounds after note-off:
 - a voice with nothing to end it (a tone, noise or recording with no release
   above it) stops at note-off, faded over 2 ms rather than cut on a click.
 
-So give a sustained voice an amplitude envelope with the release you want. The part-by-part form (`sound x from y ...`) is
+So give a sustained voice an amplitude envelope with the release you want.
+
+**A bus.** A voice is one note, so a `drive` on a voice distorts each note of
+a chord alone. An amplifier distorts their sum. `bus v` is that sum, every
+note of the instrument playing `v`, and the shapers outside it act on it once:
+
+```
+sound di  = gain (velocity * adsr 0.002 0 1 0.04) sampled "rock/guitar-direct.sfz"
+sound amp = gain 0.12 lowpass (hz 3600) 0.35 highpass (hz 100) drive 40 highpass (hz 220) bus di
+```
+
+Outside a bus the sound is the instrument's, not a note's: gains, filters,
+drive and pan there take constants, every source is inside a bus (`a + b`
+needs one on each side), a bus holds no other bus, and `bend` and `unison`
+go inside. Notes share a bus when their instruments have the same sound,
+gain, pan and send, so two instruments panned apart are two buses. The
+instrument's gain, pan and send apply after the bus; a note's velocity and
+level apply before it, so softer playing drives less. See
+`2026-11-06-NEOMUSIC-DRUMS-DRIVE-ORCHESTRA.md` and
+`examples/neomusic/high-gain.neomusic`.
+
+The part-by-part form (`sound x from y ...`) is
 shorthand for the classic voice, a mix of oscillators low-passed,
 high-passed and shaped by `amp`, all under `pitch`; it can start only from a
 classic sound. `examples/neomusic/orchestral.neomusic` voices a whole cue this
@@ -335,20 +359,32 @@ The recordings already get louder with velocity (their layers), so apply only
 as much more as you want. Give the voice an envelope with a release, or the
 recording stops at note-off. A note outside every region is an error.
 
+A region with `loop_mode=one_shot` plays to the end of its recording whenever
+the note ends (a release above it still ends it, which is a choke), and one
+with `pitch_keytrack=0` plays as recorded on every key. Together they are a
+drum: `sampled "rock/kick.sfz"` needs no envelope, and a drum line's steps
+and lengths only say when.
+
 - **The SFZ subset:** `<control>`, `<group>`, `<region>`; `sample`,
-  `default_path`, `pitch_keycenter`, `key`, `lokey`, `hikey`, `lovel`, `hivel`,
-  `tune`, `volume`, `loop_mode`, `loop_start`, `loop_end`, `seq_length`,
-  `seq_position`. Anything else is an error naming it.
+  `default_path`, `pitch_keycenter`, `pitch_keytrack` (0 or 100), `key`,
+  `lokey`, `hikey`, `lovel`, `hivel`, `tune`, `volume`, `loop_mode`,
+  `loop_start`, `loop_end`, `seq_length`, `seq_position`. Anything else is an
+  error naming it.
 - **WAV formats:** 16-, 24- and 32-bit PCM or 32/64-bit float, any rate.
 - **Finding files:** an SFZ file or room is found next to the document, then
   under each directory in `NEOMUSIC_SAMPLES` (colon-separated); its samples
   next to the SFZ file, then the same way.
 - **Reading:** audio is read when a note first plays it, so keep the files in
   place while rendering.
-- **The orchestra:** `examples/neomusic/vsco/` maps VSCO 2 Community Edition
-  (CC0) instruments: `strings`, `violins`, `violas`, `cellos`, `bass`,
-  `violin-pizz`, `cello-pizz`, `harp`, `flute`, `horn`, `timpani`. Its
-  `make-sfz.py` says how to get the library.
+- **The orchestra:** `examples/neomusic/vsco/` maps all of VSCO 2 Community
+  Edition (CC0), 100 maps: the string sections and solo violin and bass
+  (sustained, pizzicato, spiccato, tremolo), harp, the woodwinds and brass
+  (sustained and staccato), two uprights, organ, tuned percussion, timpani,
+  and 35 unpitched percussion maps that play as recorded. Its `make-sfz.py`
+  lists them and says how to get the library;
+  `examples/neomusic/orchestra-tutti.neomusic` plays the newer ones.
+- **A kit and a direct guitar:** `examples/neomusic/rock/` maps Big Rusty
+  Drums and the FreePats direct electric guitar (both CC0); see its README.
   `examples/neomusic/orchestral-recorded.neomusic` is the orchestral cue
   played by it, in a recorded concert hall made by
   `examples/neomusic/rooms/make-room.py`.
@@ -552,8 +588,9 @@ written beat, placed through the tempo clock, then reset at the note-off.
 Expression above 1 is clipped to full. Custom synth patches, gain/pan/reverb
 are not reproduced. Steps must use 12-EDO with an exactly aligned 12-TET
 reference (floating-point tolerance applies). No pitch rounding. Notes must fit
-MIDI 0–127. An instrument declared `pitch unpitched` is rejected until a
-percussion mapping exists; nothing is inferred from its sound. Overlapping
+MIDI 0–127. An instrument declared `pitch unpitched` is rejected; `pitch KEY`
+(`Percussion key`) emits hits on GM percussion channel 10 at `key` without
+consuming a pitched channel; nothing is inferred from its sound. Overlapping
 unisons get separate channels; channel exhaustion beyond 15 pitched channels
 is an error (overlapping notes under *different* curves, such as a humanized
 `cresc` over chords, can reach it). Off events precede

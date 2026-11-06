@@ -266,7 +266,7 @@ data VoiceE = VLeaf A.Voice | VWrap (A.Voice -> A.Voice) VoiceE | VMix VoiceE Vo
 
 -- | The words of a voice expression, which no sound may be named.
 voiceWords :: [String]
-voiceWords = ["tone","noise","plucked","sampled","gain","bend","lowpass","highpass","bandpass","unison","pan"]
+voiceWords = ["tone","noise","plucked","sampled","gain","bend","lowpass","highpass","bandpass","drive","unison","pan","bus"]
 
 -- | The recordings a document uses, loaded ('loadDocument'), by the paths it
 -- writes: instruments (SFZ files) and rooms (impulse responses).
@@ -352,8 +352,10 @@ voiceTerm = between (symbol "(") (symbol ")") voiceP
   <|> (keyword "lowpass" *> ((\m r -> VWrap (A.Lowpass m r)) <$> modAtom <*> constant <*> voiceTerm))
   <|> (keyword "highpass" *> (VWrap . A.Highpass <$> modAtom <*> voiceTerm))
   <|> (keyword "bandpass" *> ((\m w -> VWrap (A.Bandpass m w)) <$> modAtom <*> constant <*> voiceTerm))
+  <|> (keyword "drive" *> (VWrap . A.Drive <$> modAtom <*> voiceTerm))
   <|> (keyword "unison" *> ((\u c w -> VWrap (A.Unison u c w)) <$> integer <*> constant <*> constant <*> voiceTerm))
   <|> (keyword "pan" *> (VWrap . A.Pan <$> modAtom <*> voiceTerm))
+  <|> (keyword "bus" *> (VWrap A.Bus <$> voiceTerm))
   <|> (VRef <$> ident)
 
 waveP :: Parser A.Wave
@@ -637,11 +639,18 @@ parseDocumentWith assets input = do
       "pitch" -> case value of
         "pitched" -> Right (i {pitchIdentity=Pitched},staff)
         "unpitched" -> Right (i {pitchIdentity=Unpitched},staff)
-        _ -> Left "instrument pitch must be pitched or unpitched"
+        _ -> case percussionKey value of
+          Just k -> Right (i {pitchIdentity=Percussion k},staff)
+          Nothing -> Left "instrument pitch must be pitched, unpitched, or a MIDI key (0..127 or C4)"
       "gain" -> do x <- runLine line headerNumber value; pure (i {gain=x},staff)
       "pan" -> do x <- runLine line headerNumber value; pure (i {pan=x},staff)
       "send" -> do x <- runLine line headerNumber value; pure (i {send=x},staff)
       _ -> Left ("unknown instrument attribute: "++attr)
+    percussionKey v = case pitchNumber v of
+      Right k -> Just k
+      Left _ -> case runLine 0 integer v of
+        Right k | k >= 0 && k <= 127 -> Just k
+        _ -> Nothing
 
 -- | What evaluation can see: the document's and the prelude's definitions,
 -- whether it is inside a prelude body, the parameters bound here, and the

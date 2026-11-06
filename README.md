@@ -49,26 +49,29 @@ on the path; sheet music needs LilyPond.
 | `src/NeoMusic/` | the library: `Score`, `Signal`, `Language`, `Audio`, `Recording`, `Midi`, `Numeric`, `Sheet`, and the prelude |
 | `app/neo-music` | the command-line renderer for `.neomusic` files |
 | `pieces/` | personal pieces written against the library directly (`screw-bgm`, `screw-anime`, `terra-bgm`), a separate package not built by default: `cabal build all --project-file=cabal.project.pieces` |
-| `examples/neomusic/` | example scores, SFZ instrument maps for VSCO 2 CE, Salamander and Meta guitars, and room impulse tooling |
+| `examples/neomusic/` | example scores, SFZ instrument maps for VSCO 2 CE, Salamander and Meta guitars, Big Rusty Drums and a direct electric guitar, and room impulse tooling |
 | `test/` | Hedgehog properties and LilyPond golden files |
 | `docs/` | the dated design record |
 
 Recorded instruments and rooms are kept outside this repository. One script
 fetches everything the example scores use and checks each download and file
 against the SHA-256 values in `examples/neomusic/samples.lock.json`
-(Python 3 standard library; the acoustic step also needs FFmpeg):
+(Python 3 standard library; the acoustic and rock steps also need FFmpeg, and
+rock needs bsdtar or 7z):
 
 ```sh
-python3 scripts/fetch-samples.py --samples ~/neomusic-samples --fetch   # ~4 GB download
+python3 scripts/fetch-samples.py --samples ~/neomusic-samples --fetch   # ~5 GB download
 export NEOMUSIC_SAMPLES=~/neomusic-samples
 cabal run neo-music -- check examples/neomusic/orchestral-recorded.neomusic
 ```
 
-`--only vsco|rooms|acoustic` fetches one library: VSCO 2 Community Edition
-(CC0; only the 290 files the maps use are extracted), the OpenAIR Jack Lyons
+`--only vsco|rooms|acoustic|rock` fetches one library: VSCO 2 Community Edition
+(CC0; the 2,358 files the maps use are extracted), the OpenAIR Jack Lyons
 Concert Hall impulse response (CC BY 4.0, made stereo by
-`examples/neomusic/rooms/make-room.py`), and Salamander piano plus Meta guitars
+`examples/neomusic/rooms/make-room.py`), Salamander piano plus Meta guitars
 (via the [acoustic setup guide](examples/neomusic/acoustic/README.md)'s
+`prepare.py`), and Big Rusty Drums plus the FreePats direct electric guitar
+(both CC0, via the [kit and guitar guide](examples/neomusic/rock/README.md)'s
 `prepare.py`). `--archive-dir` keeps downloads in a reusable cache. A score that
 names a missing recording fails with a message pointing here. Offline tests:
 `python3 scripts/test_fetch_samples.py`. See also

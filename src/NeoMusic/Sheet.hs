@@ -1,7 +1,7 @@
 -- | Piano engraving is a view over exact beat events, never audio samples.
 module NeoMusic.Sheet (engrave, sheetEvents) where
 
-import Control.Monad (unless, when)
+import Control.Monad (unless)
 import Numeric (showFFloat)
 import Data.List (intercalate, nub, sort, sortOn)
 import qualified Data.Map.Strict as M
@@ -25,14 +25,22 @@ sheetEvents perf view score = do
     convert e = do
       i <- maybe (Left "missing instrument") Right (M.lookup (instrument e) (instruments perf))
       staff <- maybe (Left ("missing staff for " ++ instrument e)) Right (M.lookup (instrument e) (staves view))
-      when (pitchIdentity i == Unpitched)
-        (Left "unpitched instruments cannot be engraved without a staff mapping")
-      -- Validate the tuning even for an all-rest instrument.
-      _ <- midiPitch (tuning i) (A.Step 0)
-      ps <- mapM (midiPitch (tuning i)) (pitches (event e))
-      unless (all (\p -> p >= 21 && p <= 108) ps) (Left "pitch outside piano range A0..C8")
+      ps <- case pitchIdentity i of
+        Unpitched -> Left "unpitched instruments cannot be engraved without a staff mapping"
+        Percussion drum -> do
+          unless (drum >= 21 && drum <= 108) (Left "pitch outside piano range A0..C8")
+          pure [drum | not (null (pitches (event e)))]
+        Pitched -> do
+          -- Validate the tuning even for an all-rest instrument.
+          _ <- midiPitch (tuning i) (A.Step 0)
+          ks <- mapM (midiPitch (tuning i)) (pitches (event e))
+          unless (all (\p -> p >= 21 && p <= 108) ks) (Left "pitch outside piano range A0..C8")
+          pure ks
+      let ev = case pitchIdentity i of
+            Percussion _ -> (event e) {pitchShift = Const 0}
+            _ -> event e
       unless (dyadic (onset e) && dyadic (dur (event e))) (Left "sheet supports durations on a 32nd-note grid; tuplets are not supported")
-      pure (staff, onset e, dur (event e), ps, event e)
+      pure (staff, onset e, dur (event e), ps, ev)
 
 engrave :: Performance -> SheetView -> Score -> Either String String
 engrave perf view score = do
@@ -64,7 +72,7 @@ engrave perf view score = do
         | otherwise = "s4*" ++ show (numerator d) ++ (if denominator d == 1 then "" else "/" ++ show (denominator d)) ++ " "
       -- With numbers on, say what they mean once, above the music.
       zeros = nub [ (name, z) | e <- flattened, let name = instrument e, M.member name (staves view)
-                  , Just i <- [M.lookup name (instruments perf)], Right z <- [midiPitch (tuning i) (A.Step 0)] ]
+                  , Just i <- [M.lookup name (instruments perf)], pitchIdentity i == Pitched, Right z <- [midiPitch (tuning i) (A.Step 0)] ]
       zeroText = case nub (map snd zeros) of
         [z] -> "0 = " ++ keyName' z
         _ -> intercalate ", " [name ++ " 0 = " ++ keyName' z | (name, z) <- zeros]

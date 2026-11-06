@@ -1,0 +1,66 @@
+-- A recorded drum kit: eight bars on Big Rusty Drums (Karoryfer Samples, CC0).
+-- Four bars of a groove with ghost notes and an open hi-hat, a fill around
+-- the toms, then four bars on the ride with a sidestick, ending on a crash.
+-- Needs NEOMUSIC_SAMPLES holding the kit (examples/neomusic/rock/prepare.py).
+-- See examples/neomusic/rock/README.md for every drum that is mapped.
+
+tempo 96
+tuning 12 at C4
+meter 4
+
+-- Each map plays its drum as recorded on every key, to the end of the
+-- recording: a drum line's steps and lengths only say when. How hard a note
+-- is played chooses among up to fourteen recorded strengths, and repeats of a
+-- drum rotate through four takes of each.
+sound kickS  = sampled "rock/kick.sfz"
+sound snareS = sampled "rock/snare.sfz"
+sound stickS = sampled "rock/sidestick.sfz"
+sound hatS   = sampled "rock/hat-closed.sfz"
+sound pedalS = sampled "rock/hat-pedal.sfz"
+sound rideS  = sampled "rock/ride.sfz"
+sound bellS  = sampled "rock/ride-bell.sfz"
+sound crashS = sampled "rock/crash.sfz"
+sound tom1S  = sampled "rock/tom-14.sfz"
+sound tom2S  = sampled "rock/tom-15.sfz"
+sound tom3S  = sampled "rock/tom-18.sfz"
+sound tom4S  = sampled "rock/tom-22.sfz"
+-- A release above a one-shot ends it with the note: an open hi-hat, written
+-- as long as it stays open, is choked when the note ends.
+sound openS  = gain (adsr 0.001 0 1 0.06) sampled "rock/hat-open.sfz"
+
+master rate 44100 bits 24 peak 0.8 tail 2
+
+-- `pitch KEY` is the drum's General MIDI key, for MIDI and the staff.
+instrument kick  = kickS pitch 36
+instrument snare = snareS gain 0.9 pitch 38
+instrument stick = stickS gain 2 pitch 37
+instrument hat   = hatS gain 0.6 pitch 42
+instrument pedal = pedalS gain 0.6 pitch 44
+instrument ohat  = openS gain 0.6 pitch 46
+instrument ride  = rideS gain 0.7 pitch 51
+instrument bell  = bellS gain 0.6 pitch 53
+instrument crash = crashS gain 0.8 pitch 49
+instrument tom1  = tom1S gain 0.9 pitch 50
+instrument tom2  = tom2S gain 0.9 pitch 47
+instrument tom3  = tom3S gain 0.9 pitch 43
+instrument tom4  = tom4S gain 0.9 pitch 41
+
+g = vel 0.25 [0:1/4]                               -- a ghost note
+groove = _ 0 _:1/4 g _:1/4 g 0                     -- backbeat with ghosts before beat 4
+h8 = [vel 0.8 [0:1/2] vel 0.45 [0:1/2]]*4          -- eighths, the off-beats lighter
+h7 = [vel 0.8 [0:1/2] vel 0.45 [0:1/2]]*3 vel 0.8 [0:1/2] _:1/2
+
+kick:  humanize 3 [[0 _:1/2 0:1/2 _ 0:1/2 0:1/2]*3  0 _:1/2 0:1/2 _:2
+       [0 _:1/2 0:1/2 0:1/2 _:1/2 _]*3  0 _:1/2 0:1/2 0:2]
+snare: humanize 7 [[groove]*3  _ 0 _:2  _:12  _:2 cresc 0.3 1 [[0:1/4]*8]]
+stick: _:16 humanize 9 [vel 0.7 [[_ 0 _ 0]*3]] _:4
+hat:   humanize 13 [h8 h7 h8 [vel 0.8 [0:1/2] vel 0.45 [0:1/2]]*2 _:2] _:16
+ohat:  _:15/2 0:1/2 _:24
+pedal: _:16 vel 0.6 [[_ 0 _ 0]*4]
+ride:  _:16 humanize 17 [vel 0.65 [[0:1/2]*24]] _:4
+bell:  _:16 [_:7/2 vel 0.7 [0:1/2]]*3 _:4
+tom1:  _:14 vel 0.7 [0:1/4] vel 0.9 [0:1/4] _:3/2 _:16
+tom2:  _:14 _:1/2 vel 0.7 [0:1/4] vel 0.9 [0:1/4] _:1 _:16
+tom3:  _:15 vel 0.75 [0:1/4] vel 0.95 [0:1/4] _:1/2 _:16
+tom4:  _:15 _:1/2 vel 0.8 [0:1/4] 0:1/4 _:16
+crash: 0:4 _:12 0:4 _:10 _:2

@@ -9,7 +9,7 @@ import NeoMusic.Sheet (engrave)
 import qualified NeoMusic.Score as S
 import System.Environment (getArgs, lookupEnv)
 import System.Directory (findExecutable)
-import System.FilePath (dropExtension, takeExtension, (</>))
+import System.FilePath (dropExtension, searchPathSeparator, takeExtension, (</>))
 import System.Info (os)
 import System.IO.Temp (withSystemTempDirectory)
 import Data.List (intercalate)
@@ -60,10 +60,10 @@ playNow opts input = do
         Nothing -> pure ()
 
 -- | A document with the recordings it names, found next to it or under each
--- directory in NEOMUSIC_SAMPLES (separated by colons).
+-- directory in NEOMUSIC_SAMPLES.
 readDocument :: FilePath -> IO Document
 readDocument path = do
-  dirs <- maybe [] (splitOn ':') <$> lookupEnv "NEOMUSIC_SAMPLES"
+  dirs <- maybe [] (splitOn searchPathSeparator) <$> lookupEnv "NEOMUSIC_SAMPLES"
   loadDocument dirs path >>= orDie
   where
     splitOn c xs = case break (== c) xs of

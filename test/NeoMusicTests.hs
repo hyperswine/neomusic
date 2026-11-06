@@ -233,14 +233,22 @@ neoMusicGroup = Group "NeoMusic audio engine"
       -- A voice sounds until note-off plus its longest release.
       (cut, _) <- evalEither (voiceRender 8000 1 [voiceNote (Gain (adsr 0.001 0 1 0.2) (Tone SineWave)) 0 220 0.5 1])
       assert (VU.any ((> 1e-3) . abs) (VU.slice 4400 400 cut) && VU.all (== 0) (VU.drop 5700 cut))
+      -- Drive: 0 leaves the signal unchanged; > 0 saturates within +-1 and boosts a sub-unity tone.
+      let quietSine = Gain (K 0.5) (Tone SineWave)
+      (plainSine, _) <- evalEither (voiceRender 8000 0.5 [voiceNote quietSine 0 220 0.4 1])
+      (zeroDrive, _) <- evalEither (voiceRender 8000 0.5 [voiceNote (Drive (K 0) quietSine) 0 220 0.4 1])
+      (hardDrive, _) <- evalEither (voiceRender 8000 0.5 [voiceNote (Drive (K 2.5) quietSine) 0 220 0.4 1])
+      zeroDrive === plainSine
+      assert (meanSquare hardDrive 0 3200 > meanSquare plainSine 0 3200 && VU.all ((<= 1) . abs) hardDrive)
       -- Unpitched: every part is. Noise is; a bend into the note makes it so.
       let flute = sinePatch {oscillators = [Osc TriangleWave 0 1 1 0, Osc NoiseWave 0 0.04 1 0]}
       [percussive v | v <- [Noise, Tone SawWave :& Gain (K 0.1) Noise, Bend (Approach 12 0 0.1) (Tone SineWave)
-                           , Plucked 1 0.5, Classic kick, Classic snare, Classic flute, Gain (K 2) (Highpass (K 3) Noise)]]
-        === [True, False, True, False, True, True, False, True]
+                           , Plucked 1 0.5, Classic kick, Classic snare, Classic flute, Gain (K 2) (Highpass (K 3) Noise)
+                           , Drive (K 2) Noise]]
+        === [True, False, True, False, True, True, False, True, True]
       mapM_ (assert . isLeft . validVoice)
-        [ Tone NoiseWave, Plucked 0 0.5, Plucked 1 2, Bandpass (K 1) 0 (Tone SineWave), Pan (K 2) Noise
-        , Lowpass (K 1) 1 Noise, Unison 0 0 0 Noise, Gain (Linear 0 1 0) Noise, Classic sinePatch {resonance = 1} ])
+        [ Tone NoiseWave, Plucked 0 0.5, Plucked 1 2, Bandpass (K 1) 0 (Tone SineWave), Drive (K (-1)) Noise
+        , Pan (K 2) Noise, Lowpass (K 1) 1 Noise, Unison 0 0 0 Noise, Gain (Linear 0 1 0) Noise, Classic sinePatch {resonance = 1} ])
     , ("recordings: WAV, SFZ, layers, takes, rooms", withTests 1 $ property $ do
       -- WAV at 16 and 24 bits reads back to within its step.
       let tone amp f = VU.generate 11025 (\i -> amp * sin (2 * pi * f * fromIntegral i / 22050))
@@ -334,7 +342,7 @@ neoMusicGroup = Group "NeoMusic audio engine"
           frames = 4410                                   -- a 0.1 s recording of C4
           c4 = VU.generate frames (\i -> realToFrac (sin (2 * pi * 261.63 * fromIntegral i / fr)) :: Float)
           recording = Recording "memory.wav" fr frames Nothing [c4]
-          setAt key lp = SampleSet "memory.sfz" [Region recording 60 (key, key) (1, 127) 1 (1, 1) lp False]
+          setAt key lp = SampleSet "memory.sfz" [Region recording 60 (key, key) (1, 127) 1 (1, 1) lp False Nothing False]
           sampled key lp = Gain (adsr 0.001 0 1 0.05) (Sampled (setAt key lp))
           half = round (0.5 * fr) :: Int
       -- A loop may end on the recording's last frame and keeps playing.
@@ -359,6 +367,77 @@ neoMusicGroup = Group "NeoMusic audio engine"
       let peak = VU.maximum (VU.map abs (VU.take half cut))
           lastWindow = VU.slice (half + 66) 22 cut              -- the final half millisecond
       assert (VU.maximum (VU.map abs lastWindow) < 0.3 * peak))
+  , ("one-shots, fixed pitch and buses", withTests 1 $ property $ do
+      let rate = 44100 :: Int
+          fr = fromIntegral rate :: Double
+          frames = 4410                                   -- a 0.1 s recording of C4
+          c4 = VU.generate frames (\i -> realToFrac (sin (2 * pi * 261.63 * fromIntegral i / fr)) :: Float)
+          recording = Recording "memory.wav" fr frames Nothing [c4]
+          region fixed oneShot = Region recording 60 (0, 127) (1, 127) 1 (1, 1) Nothing False fixed oneShot
+          sampled fixed oneShot = Sampled (SampleSet "memory.sfz" [region fixed oneShot])
+          short voice f = voiceNote voice 0 f 0.02 1                  -- note-off at 882 frames
+          energy v from to = VU.sum (VU.map (^ (2 :: Int)) (VU.slice from (to - from) v))
+          worst a b = VU.maximum (VU.map abs (VU.zipWith (-) a b))
+      -- The opcodes: pitch_keytrack is 0 or 100, and a fixed region's tune is a speed.
+      loaded <- evalIO $ withSystemTempDirectory "neomusic" $ \dir -> do
+        pcmWavBits 16 (dir </> "hit.wav") 22050 [VU.generate 2205 (\i -> 0.5 * sin (2 * pi * 220 * fromIntegral i / 22050))]
+        writeFile (dir </> "drum.sfz") "<region> sample=hit.wav lokey=0 hikey=127 pitch_keytrack=0 tune=1200 loop_mode=one_shot\n<region> sample=hit.wav key=60\n"
+        writeFile (dir </> "half.sfz") "<region> sample=hit.wav pitch_keytrack=50\n"
+        (,) <$> readSampleSet [] (dir </> "drum.sfz") <*> readSampleSet [] (dir </> "half.sfz")
+      drum <- evalEither (fst loaded)
+      map (\r -> (regionFixed r, regionOneShot r)) (setRegions drum) === [(Just 2, True), (Nothing, False)]
+      assert (isLeft (snd loaded))
+      -- A one-shot plays to its end whenever the note ends; any other recording stops with the note.
+      (cut, _) <- evalEither (voiceRender rate 0.5 [short (sampled Nothing False) 261.63])
+      (whole, _) <- evalEither (voiceRender rate 0.5 [short (sampled Nothing True) 261.63])
+      (held, _) <- evalEither (voiceRender rate 0.5 [voiceNote (sampled Nothing False) 0 261.63 0.2 1])
+      energy cut 1000 4410 === 0
+      assert (energy whole 1000 4400 > 100 && worst (VU.take 4400 whole) (VU.take 4400 held) < 1e-12)
+      -- Played an octave lower it lasts twice as long, and all of it sounds.
+      (low, _) <- evalEither (voiceRender rate 0.5 [short (sampled Nothing True) 130.815])
+      assert (energy low 4500 8700 > 100 && energy low 8830 9000 == 0)
+      -- A release above it still ends it: that is a choke.
+      (choked, _) <- evalEither (voiceRender rate 0.5 [short (Gain (adsr 0.001 0 1 0.01) (sampled Nothing True)) 261.63])
+      energy choked 1400 4410 === 0
+      -- A fixed region plays as recorded on every key; one that follows the key does not.
+      (onC, _) <- evalEither (voiceRender rate 0.5 [short (sampled (Just 1) True) 261.63])
+      (onA, _) <- evalEither (voiceRender rate 0.5 [short (sampled (Just 1) True) 880])
+      (movedA, _) <- evalEither (voiceRender rate 0.5 [short (sampled Nothing True) 880])
+      annotateShow (worst onC onA)
+      assert (worst onC onA < 1e-9 && worst onC movedA > 0.1)
+      -- A bus sums an instrument's notes. Shapers that are linear give the
+      -- same sound outside it as inside; a drive does not, since the notes
+      -- of a chord then pass through it together.
+      let inner = Gain (Velocity :* adsr 0.001 0 1 0.05) (Tone SawWave)
+          chord voice = [voiceNote voice 0 110 0.3 0.4, voiceNote voice 0.05 164.81 0.25 0.4]
+          render' ns = fst <$> voiceRender rate 0.5 ns
+          cabinet v = Gain (K 0.5) (Lowpass (cutoffHz 2000) 0.2 (Highpass (cutoffHz 100) v))
+      perNote <- evalEither (render' (chord (cabinet inner)))
+      onBus <- evalEither (render' (chord (cabinet (Bus inner))))
+      -- (While the notes sound: a note's filters stop with it, a bus's ring on.)
+      let sounding = VU.take 13000
+      annotateShow (worst (sounding perNote) (sounding onBus))
+      assert (worst (sounding perNote) (sounding onBus) < 1e-9)
+      drivenNotes <- evalEither (render' (chord (Drive (K 8) inner)))
+      drivenBus <- evalEither (render' (chord (Drive (K 8) (Bus inner))))
+      assert (worst drivenNotes drivenBus > 0.1 && VU.all ((<= 1) . abs) drivenBus)
+      -- One note alone is the same either way.
+      alone <- evalEither (render' (take 1 (chord (Drive (K 8) inner))))
+      aloneBus <- evalEither (render' (take 1 (chord (Drive (K 8) (Bus inner)))))
+      assert (worst (sounding alone) (sounding aloneBus) < 1e-9)
+      -- A bus belongs to an instrument: the same sound at another pan is another bus.
+      let driven = Drive (K 8) (Bus inner)
+          left = (voiceNote driven 0 110 0.3 0.4) {pan = -1}
+          right = (voiceNote driven 0.05 164.81 0.25 0.4) {pan = 1}
+      both <- evalEither (render' [left, right])
+      onlyLeft <- evalEither (render' [left])
+      assert (worst both onlyLeft < 1e-9 && VU.maximum (VU.map abs onlyLeft) > 0.1)
+      -- What may stand outside a bus.
+      mapM_ (assert . isLeft . validVoice)
+        [ Bus (Bus inner), Gain Velocity (Bus inner), Lowpass Key 0 (Bus inner), Bend (K 12) (Bus inner)
+        , Unison 2 10 0 (Bus inner), inner :& Bus inner, Drive (adsr 0.1 0 1 0.1) (Bus inner) ]
+      mapM_ (\v -> validVoice v === Right ())
+        [ Bus inner, Drive (K 8) (Bus inner) :& Gain (K 0.2) (Bus (Tone SineWave)), Pan (K 0.5) (cabinet (Bus inner)) ])
   , ("16-bit TPDF dither: seeded, within one step, 24-bit untouched", withTests 1 $ property $ do
       let lsb = 1 / 32767
           quiet = VU.generate 4000 (\i -> 0.4 * lsb * sin (2 * pi * 440 * fromIntegral i / 8000))

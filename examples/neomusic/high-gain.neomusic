@@ -1,0 +1,108 @@
+-- "Overdrive": eighteen bars of high-gain guitars over a recorded kit.
+-- A riff on one guitar, then two (left and right) with the drums, a chorus
+-- of held power chords under a lead, and an ending on unison hits.
+-- Composed 2026-11-06 to exercise `bus`, `drive` and recorded drums; see
+-- docs/2026-11-06-NEOMUSIC-DRUMS-DRIVE-ORCHESTRA.md.
+-- Needs NEOMUSIC_SAMPLES holding Big Rusty Drums and the FreePats direct
+-- guitar (both CC0; examples/neomusic/rock/prepare.py) and the Jack Lyons
+-- room (OpenAIR, Audiolab, University of York, CC BY 4.0; rooms/make-room.py).
+
+tempo 150
+tuning 12 at C4
+meter 4
+
+-- The guitar as recorded: a raw instrument signal, one voice per note.
+sound di = gain ((0.55 + 0.45 * velocity) * adsr 0.002 0 1 0.04) sampled "rock/guitar-direct.sfz"
+
+-- An amplifier is one drive for the whole instrument, so its notes go through
+-- it together: `bus di` is every note of the instrument, summed. Before the
+-- drive a high-pass keeps the low strings tight; after it, a high-pass and
+-- two low-passes stand for the speaker cabinet.
+sound rhythm = gain 0.12 lowpass (hz 5200) 0.2 lowpass (hz 3600) 0.35 highpass (hz 100)
+               drive 40 highpass (hz 220) bus di
+sound lead   = gain 0.25 lowpass (hz 4600) 0.3 highpass (hz 160)
+               drive 25 highpass (hz 320) bus di
+
+-- The kit: Big Rusty Drums. Each drum plays as recorded on every key and to
+-- the end of its recording, so a drum line's steps and lengths only say when.
+sound kickS  = sampled "rock/kick.sfz"
+sound snareS = sampled "rock/snare.sfz"
+sound hatS   = sampled "rock/hat-closed.sfz"
+sound rideS  = sampled "rock/ride.sfz"
+sound crashS = sampled "rock/crash.sfz"
+sound chinaS = sampled "rock/china.sfz"
+sound tom1S  = sampled "rock/tom-14.sfz"
+sound tom2S  = sampled "rock/tom-15.sfz"
+sound tom3S  = sampled "rock/tom-18.sfz"
+-- An open hi-hat is closed again by the player, so this one ends with its
+-- note: write it as long as the hat stays open.
+sound openS  = gain (adsr 0.001 0 1 0.06) sampled "rock/hat-open.sfz"
+
+reverb space "rooms/jack-lyons/jack-lyons-lp2-stereo.wav" wet 0.25 predelay 0
+master rate 44100 bits 24 peak 0.8 tail 3
+
+-- The same part on both sides is two players: the takes rotate and each side
+-- is humanized with its own seed.
+instrument gtrL  = rhythm gain 1 pan -0.8 send 0.08
+instrument gtrR  = rhythm gain 1 pan 0.8 send 0.08
+instrument lead  = lead gain 0.95 pan 0.1 send 0.35
+instrument bass  = reeseBass gain 0.3 send 0.05
+instrument kick  = kickS gain 1 send 0.08 pitch 36
+instrument snare = snareS gain 0.9 send 0.25 pitch 38
+instrument hat   = hatS gain 0.6 send 0.1 pitch 42
+instrument ohat  = openS gain 0.6 send 0.1 pitch 46
+instrument ride  = rideS gain 0.7 send 0.15 pitch 51
+instrument crash = crashS gain 0.8 send 0.25 pitch 49
+instrument china = chinaS gain 0.7 send 0.25 pitch 52
+instrument tom1  = tom1S gain 0.9 send 0.25 pitch 50
+instrument tom2  = tom2S gain 0.9 send 0.25 pitch 47
+instrument tom3  = tom3S gain 0.95 send 0.25 pitch 43
+
+-- Power chords in E minor.
+E5 = (-20 -13 -8)
+G5 = (-17 -10 -5)
+A5 = (-15 -8 -3)
+B5 = (-13 -6 -1)
+C5 = (-24 -17 -12)
+D5 = (-22 -15 -10)
+
+m = gate 0.45 [vel 0.8 [-20:1/4]]                  -- a short stab on the low string
+riffA = gate 0.9 [E5:1/2] m m m m gate 0.9 [G5:1/2] m m gate 0.9 [A5:1/2] m m gate 0.9 [B5:1/2]
+riffB = gate 0.9 [E5:1/2] m m m m gate 0.9 [G5:1/2] m m gate 0.95 [D5:1 C5:1/2]
+riff  = riffA riffB
+chorus = C5:4 D5:4 E5:8 C5:4 D5:4 G5:4 B5:4
+ending = gate 0.5 [E5:1/2 E5:1/2] _:1 gate 0.5 [G5:1/2 A5:1/2] _:1 E5:4
+
+guitar = riff riff riff riff chorus ending
+
+gtrL: humanize 11 [vel 0.9 [guitar]]
+gtrR: _:8 humanize 29 [vel 0.9 [riff riff riff chorus ending]]
+
+bassRiff = [-32:1/2]*3 -29:1/2 -32:1/2 -27:1/2 -32:1/2 -25:1/2  [-32:1/2]*3 -29:1/2 -32:1/2 -34:1 -36:1/2
+bass: _:8 vel 0.8 [bassRiff bassRiff bassRiff
+      -36:4 -34:4 -32:8 -36:4 -34:4 -29:4 -25:4
+      -32:1 _:1 -29:1/2 -27:1/2 _:1 -32:4]
+
+lead: _:32 humanize 5 [vel 0.85 [19:3 16:1  21:2 19:2  vibrato 0.15 [16:4]  _:1 12:1 14:1 16:1
+      19:3 16:1  21:2 23:2  vibrato 0.2 [24:4]  23:2 19:2]] vibrato 0.15 [vel 0.8 [_:4 16:4]]
+
+-- The kit. Bars 3-8 the riff, 9-16 the chorus on the ride, 17-18 the ending.
+k1 = 0:1/2 _:1/2 _:1/2 0:1/2 0:1/2 _:1/2 0:1/2 _:1/2
+k2 = 0:1/2 _:1/2 0:1/2 0:1/2 0:1/2 _:1/2 0:1
+kc = 0:1 _:1/2 0:1/2 0:1 _:1
+sb = _ 0 _ 0
+h8 = [vel 0.85 [0:1/2] vel 0.5 [0:1/2]]*4
+h7 = [vel 0.85 [0:1/2] vel 0.5 [0:1/2]]*3 vel 0.85 [0:1/2] _:1/2      -- the last eighth is the open hat's
+
+kick:  _:8 humanize 3 [[k1 k2]*3 [kc]*8 0:1/2 0:1/2 _:1 0:1/2 0:1/2 _:1 0:4]
+snare: _:8 humanize 7 [[sb]*5 _ 0 _ vel 0.6 [0:1/4] vel 0.75 [0:1/4] vel 0.9 [0:1/4] 0:1/4
+       [sb]*7 _ 0 vel 0.7 [0:1/4 0:1/4] _:1/2 _:1
+       0:1/2 0:1/2 _:1 0:1/2 0:1/2 _:1 0:4]
+hat:   _:8 humanize 13 [[h8 h7]*3] _:40
+ohat:  _:8 [_:15/2 0:1/2]*3 _:40
+ride:  _:32 humanize 17 [vel 0.7 [[0]*31 _]] _:8
+crash: _:8 0:4 _:20 0:4 _:28 0:8
+china: _:16 0:8 _:44 0:4
+tom1:  _:30 _:1 vel 0.8 [0:1/4 0:1/4] _:1/2  _:30 _:1 _:1/2 _:1/2 _:8
+tom2:  _:62 vel 0.85 [0:1/4 0:1/4] _:1/2 _:1 _:8
+tom3:  _:62 _:1/2 vel 0.9 [0:1/4 0:1/4] _:1 _:8

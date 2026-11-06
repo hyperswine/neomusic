@@ -52,6 +52,18 @@ jobs:
       - name: Test
         run: cabal test --test-show-details=direct
 
+      - name: Python sample and mapping tests
+        run: |
+          python3 scripts/test_fetch_samples.py
+          python3 examples/neomusic/acoustic/test_prepare.py
+          python3 examples/neomusic/rock/test_prepare.py
+
+      - name: Build and check pieces
+        run: |
+          cabal build all --project-file=cabal.project.pieces
+          cabal run -v0 terra-bgm --project-file=cabal.project.pieces -- --check
+          cabal run -v0 screw-anime --project-file=cabal.project.pieces -- --check
+
       - name: Check examples (no external samples needed)
         run: |
           for f in articulation cents composition curves forest numeric-preview \

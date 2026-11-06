@@ -1,0 +1,24 @@
+[
+  {
+    "id": "big-rusty-drums",
+    "archive": "big-rusty-drums-f07ce00df34a46b6b08375be56fe116cf15782bc.tar.gz",
+    "url": "https://codeload.github.com/sfzinstruments/karoryfer.big-rusty-drums/tar.gz/f07ce00df34a46b6b08375be56fe116cf15782bc",
+    "sha256": "eef084b372505b2ce24654548966d8448cd3c566b8ef036c7027ac30ce8d75b7",
+    "archive_checksum_advisory": true,
+    "checksum_source": "computed from the download on 2026-11-06; upstream publishes no checksums",
+    "revision": "f07ce00df34a46b6b08375be56fe116cf15782bc",
+    "license": "CC0-1.0",
+    "credit": "Karoryfer Samples (Big Rusty Drums)"
+  },
+  {
+    "id": "freepats-eguitar",
+    "archive": "EGuitarFSBS-direct-SFZ+FLAC-20220911.7z",
+    "url": "https://github.com/freepats/electric-guitar-FSBS-direct/releases/download/2022-09-11/EGuitarFSBS-direct-SFZ+FLAC-20220911.7z",
+    "sha256": "7ab2a4551bb8847342d6fd10cc56e0642fcaf43f3be8d665269c4dc9bfbbd599",
+    "checksum_source": "computed from the download on 2026-11-06; upstream publishes no checksums",
+    "version": "2022-09-11",
+    "sample_count": 122,
+    "license": "CC0-1.0",
+    "credit": "FreePats project (Electric Guitar FSBS, direct)"
+  }
+]

@@ -66,9 +66,9 @@ instrument vln    = vlnS gain 1.0 pan 0.2 send 0.6
 instrument halo   = haloS gain 0.4 pan 0.35 send 0.6
 instrument pizz   = pizzS gain 1.3 pan -0.3 send 0.45
 instrument harp   = harpS gain 2.4 pan 0.3 send 0.55
-instrument kick   = kick gain 0.95 pitch unpitched
-instrument snare  = snare gain 0.5 pitch unpitched
-instrument hat    = hat gain 0.3 pitch unpitched
+instrument kick   = kick gain 0.95 pitch 36
+instrument snare  = snare gain 0.5 pitch 38
+instrument hat    = hat gain 0.3 pitch 42
 instrument breath = breathS gain 0.45 send 0.7
 
 -- G minor. Voicings around middle C; the arpeggio pattern is root, fifth,

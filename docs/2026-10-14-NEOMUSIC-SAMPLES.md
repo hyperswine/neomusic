@@ -209,3 +209,13 @@ A room needs an impulse response with a license that allows reuse. Candidates:
 6. **Start with VSCO 2 CE (CC0),** downloading only the folders the
    orchestral cue needs (about 470 MB), plus one impulse response.
    Recommended.
+
+## 2026-11-06: fixed and one-shot regions, and the whole library
+
+The subset in section 3 gained `pitch_keytrack` (0 or 100), and
+`loop_mode=one_shot` now means what it says: the recording plays to its end
+whenever the note ends. Before, it was read as `no_loop`. Together they make
+a drum, which answers the "drum-kit mapping" line above without a percussion
+system. `make-sfz.py` now maps all of VSCO 2 CE (100 maps), with the pitches
+of every folder measured. See
+[2026-11-06-NEOMUSIC-DRUMS-DRIVE-ORCHESTRA](2026-11-06-NEOMUSIC-DRUMS-DRIVE-ORCHESTRA.md).

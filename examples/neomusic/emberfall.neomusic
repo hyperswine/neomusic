@@ -55,10 +55,10 @@ instrument timp  = timp gain 3.2 send 0.5
 instrument lead  = solo gain 1.0 send 0.45
 instrument chug  = chug gain 0.75 send 0.3
 instrument bass  = reeseBass gain 0.9 send 0.2
-instrument kick  = kick gain 1.15 pitch unpitched
-instrument snare = snare gain 0.75 pitch unpitched
-instrument hat   = hat gain 0.3 pitch unpitched
-instrument crash = crash gain 0.45 pitch unpitched send 0.6
+instrument kick  = kick gain 1.15 pitch 36
+instrument snare = snare gain 0.75 pitch 38
+instrument hat   = hat gain 0.3 pitch 42
+instrument crash = crash gain 0.45 pitch 49 send 0.6
 
 -- Voicings around middle C, and the progressions they play in.
 Dm = (-10 -3 2 5)

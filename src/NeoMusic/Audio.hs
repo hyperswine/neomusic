@@ -365,8 +365,10 @@ data Voice
   | Lowpass Mod Double Voice       -- ^ cutoff (octaves above C4) and resonance 0..1
   | Highpass Mod Voice             -- ^ cutoff (octaves above C4)
   | Bandpass Mod Double Voice      -- ^ centre (octaves above C4) and width in octaves; unity at the centre
+  | Drive Mod Voice                -- ^ tanh saturation (0 leaves the signal unchanged; > 0 drives harder, normalised to +-1)
   | Unison Int Double Double Voice -- ^ n copies detuned across c cents in total, spread across stereo width w
   | Pan Mod Voice                  -- ^ stereo position, -1..1
+  | Bus Voice                      -- ^ every note of the instrument, summed: shapers outside act on the sum
   | Voice :& Voice                 -- ^ mixed
   | Classic Patch                  -- ^ the subtractive voice: see 'expandClassic'
   | Sampled SampleSet              -- ^ recordings, chosen by pitch, velocity and take
@@ -392,7 +394,8 @@ expandClassic p = bent (Gain (amp p) (withHighpass (Lowpass (cutoff p) (resonanc
         spread v = if unison o == 1 then v else Unison (unison o) (detuneCents o) (stereoWidth p) v
 
 validVoice :: Voice -> Either String ()
-validVoice voice = case voice of
+validVoice voice = busShape voice >> case voice of
+  Bus v -> validVoice v
   Tone w -> unless (w /= NoiseWave) (Left "noise is a source of its own, not a tone")
   Noise -> pure ()
   Plucked d b -> unless (positive d && unitRange b) (Left "a plucked string needs a positive decay and brightness within 0..1")
@@ -406,6 +409,11 @@ validVoice voice = case voice of
   Bandpass m w v -> do
     modOk m
     unless (positive w) (Left "a band's width must be positive")
+    validVoice v
+  Drive m v -> do
+    modOk m
+    let (lo, _) = modBounds m
+    unless (lo >= 0) (Left "drive must be nonnegative")
     validVoice v
   Unison n c w v -> do
     unless (n >= 1 && nonNegative c && unitRange w) (Left "unison needs at least 1 copy, a nonnegative detune and width within 0..1")
@@ -424,6 +432,59 @@ validVoice voice = case voice of
         (Left (recordingPath recording ++ ": a recording must be mono or stereo"))
   where modOk m = unless (validMod m) (Left "voice modulations need finite values and positive times")
 
+-- | Whether a voice sums its instrument's notes somewhere ('Bus').
+hasBus :: Voice -> Bool
+hasBus voice = case voice of
+  Bus _ -> True
+  Gain _ v -> hasBus v
+  Bend _ v -> hasBus v
+  Lowpass _ _ v -> hasBus v
+  Highpass _ v -> hasBus v
+  Bandpass _ _ v -> hasBus v
+  Drive _ v -> hasBus v
+  Unison _ _ _ v -> hasBus v
+  Pan _ v -> hasBus v
+  a :& b -> hasBus a || hasBus b
+  _ -> False
+
+-- | The voices inside a sound's buses, in the order the engine meets them.
+busInputs :: Voice -> [Voice]
+busInputs voice = case voice of
+  Bus v -> [v]
+  Gain _ v -> busInputs v
+  Lowpass _ _ v -> busInputs v
+  Highpass _ v -> busInputs v
+  Bandpass _ _ v -> busInputs v
+  Drive _ v -> busInputs v
+  Pan _ v -> busInputs v
+  a :& b -> busInputs a ++ busInputs b
+  _ -> []
+
+-- | What may stand outside a bus. There the sound is the instrument's, not a
+-- note's, so nothing can follow a note: gains, filters, drive and pan hold
+-- constants, every source is inside a bus, and a bus holds no other bus.
+busShape :: Voice -> Either String ()
+busShape voice = when (hasBus voice) (go voice)
+  where
+    go v = case v of
+      Bus x -> when (hasBus x) (Left "a bus cannot hold another bus")
+      Gain m x -> steady m >> go x
+      Lowpass m _ x -> steady m >> go x
+      Highpass m x -> steady m >> go x
+      Bandpass m _ x -> steady m >> go x
+      Drive m x -> steady m >> go x
+      Pan m x -> steady m >> go x
+      a :& b -> go a >> go b
+      Bend _ _ -> Left "a bend cannot hold a bus: bend the voice inside it"
+      Unison _ _ _ _ -> Left "a unison cannot hold a bus: put the unison inside it"
+      _ -> Left "in a sound with a bus, every source must be inside a bus"
+    steady m = unless (noteFree m) (Left "outside a bus nothing follows a note: gains, filters, drive and pan there must be constants")
+    noteFree m = case m of
+      K _ -> True
+      a :+ b -> noteFree a && noteFree b
+      a :* b -> noteFree a && noteFree b
+      _ -> False
+
 -- | Legacy sound-shape heuristic, not pitch identity. Exporters use the
 -- instrument's explicit declaration instead. This deliberately broad heuristic
 -- considers noise unpitched, and so is everything under a
@@ -439,8 +500,10 @@ percussive voice = case voice of
   Lowpass _ _ v -> percussive v
   Highpass _ v -> percussive v
   Bandpass _ _ v -> percussive v
+  Drive _ v -> percussive v
   Unison _ _ _ v -> percussive v
   Pan _ v -> percussive v
+  Bus v -> percussive v
   a :& b -> percussive a && percussive b
   Classic p -> percussive (expandClassic p)
   Sampled _ -> False
@@ -466,8 +529,10 @@ ringing voice = case voice of
   Lowpass _ _ v -> ringing v
   Highpass _ v -> ringing v
   Bandpass _ _ v -> ringing v
+  Drive _ v -> ringing v
   Unison _ _ _ v -> ringing v
   Pan _ v -> ringing v
+  Bus v -> ringing v
   a :& b -> max (ringing a) (ringing b)
   Classic p -> releaseOf (amp p)
   Plucked decayTime _ -> decayTime
@@ -486,6 +551,49 @@ silentAfter m = case m of
     (Nothing, y) -> y
   a :+ b -> max <$> silentAfter a <*> silentAfter b
   _ -> Nothing
+
+-- | 'ringing' for one note. It differs only for a one-shot recording, which
+-- rings for what is left of it at the pitch the note plays it (a pitch that
+-- falls during the note plays it longer).
+noteRinging :: Int -> Note -> Double
+noteRinging takeNumber v = go (noteOnFrequency v) falls (sound v)
+  where
+    gate = duration v
+    vel = velocity v
+    -- How far below its note-on pitch the note's own curve takes it, as a ratio.
+    falls | pitchMod v == Flat 0 = 1
+          | otherwise = 2 ** max 0 (contourAt (pitchMod v) 0 - fst (contourBounds (pitchMod v)))
+    go f slow voice = case voice of
+      Sampled set -> maximum (0 : [seconds' r f * slow - gate | r <- chooseRegions set takeNumber vel f, regionOneShot r])
+      Gain m x -> maybe (max (releaseOf m) (go f slow x)) id (silentAfter m)
+      Bend m x ->
+        let at0 = evalPrepared (prepare gate vel m) 0 (keyOf f)
+            lowest = fst (modBounds m)
+            further = if isInfinite lowest then 0 else max 0 (at0 - lowest)
+        in go (f * 2 ** (at0 / 12)) (slow * 2 ** (further / 12)) x
+      Lowpass _ _ x -> go f slow x
+      Highpass _ x -> go f slow x
+      Bandpass _ _ x -> go f slow x
+      Drive _ x -> go f slow x
+      Unison n c _ x
+        | n <= 1 -> go f slow x
+        | otherwise -> maximum [go (f * 2 ** (c * (fromIntegral j / fromIntegral (n - 1) - 0.5) / 100 / 12)) slow x | j <- [0 .. n - 1]]
+      Pan _ x -> go f slow x
+      Bus x -> go f slow x
+      a :& b -> max (go f slow a) (go f slow b)
+      Classic p -> releaseOf (amp p)
+      Plucked decayTime _ -> decayTime
+      _ -> 0
+    seconds' r f =
+      let recording = regionRecording r
+          whole = fromIntegral (recordingFrames recording) / recordingRate recording
+      in case regionFixed r of
+           Just ratio -> whole / ratio
+           Nothing -> whole * recordedPitch r / f
+
+-- | 'voiceTail' for one note.
+noteTail :: Int -> Note -> Double
+noteTail takeNumber = max declickTime . noteRinging takeNumber
 
 -- | 1 while a note sounds, then (only for a voice with no release) a linear
 -- fade to 0 over 'declickTime' after note-off.
@@ -655,10 +763,10 @@ renderTimelinePremaster mix (Timeline total ns) = do
   validMix mix
   let highest v = hz v * 2 ** max 0 (snd (contourBounds (pitchMod v)))
   unless (all ((< fr / 2) . highest) ns) (Left "pitch reaches Nyquist frequency")
-  let end = maximum (total : [start v + duration v + voiceTail (sound v) | v <- ns]) + mixTail mix
+  let takes = takeNumbers ns
+      end = maximum (total : [start v + duration v + noteTail k v | (k, v) <- zip takes ns]) + mixTail mix
   unless (finite (end * fr) && end * fr < fromIntegral (maxBound :: Int))
     (Left "rendered sample count exceeds platform range")
-  let takes = takeNumbers ns
   forM_ (zip takes ns) $ \(k, v) -> forM_ (reaching (duration v) (velocity v) (noteOnFrequency v) (sound v)) $ \(set, f) ->
     when (null (chooseRegions set k (velocity v) f)) (Left (setPath set ++ ": nothing recorded for key "
       ++ show (round (69 + 12 * logBase 2 (f / 440)) :: Int) ++ " at velocity " ++ show (max 1 (round (velocity v * 127)) :: Int)))
@@ -667,7 +775,9 @@ renderTimelinePremaster mix (Timeline total ns) = do
         left <- MV.replicate len 0
         right <- MV.replicate len 0
         sends <- MV.replicate len 0
-        forM_ (zip3 [1 ..] takes ns) $ \(seed, k, v) -> renderNote fr seed k v left right sends
+        let numbered = zip3 [1 ..] takes ns
+        forM_ numbered $ \(seed, k, v) -> unless (hasBus (sound v)) (renderNote fr seed k v left right sends)
+        forM_ (busGroups numbered) $ \notesOfBus -> renderBus fr notesOfBus left right sends
         sendBus <- VU.unsafeFreeze sends
         let reverbOn = wet rv > 0 || maybe False ((> 0) . roomWet) (mixRoom mix)
         -- The wet signal is added into the dry buffers in place.
@@ -733,10 +843,12 @@ reaching gate vel = go
       Lowpass _ _ v -> go f v
       Highpass _ v -> go f v
       Bandpass _ _ v -> go f v
+      Drive _ v -> go f v
       Unison n c _ v
         | n <= 1 -> go f v
         | otherwise -> concat [go (f * 2 ** (c * (fromIntegral j / fromIntegral (n - 1) - 0.5) / 100 / 12)) v | j <- [0 .. n - 1]]
       Pan _ v -> go f v
+      Bus v -> go f v
       a :& b -> go f a ++ go f b
       _ -> []
 
@@ -830,9 +942,11 @@ data Node s
   | NRaise !Double (Node s)                           -- a constant bend, as a frequency ratio
   | NBend !Prepared !Bool (Node s)
   | NFilter !Int !Coefficient !Double !Bool !(MV.MVector s Double) (Node s)  -- low/high/band, cutoff, k, mono, state
+  | NDrive !Prepared !Bool !Bool !(MV.MVector s Double) (Node s)  -- amount, follows the key?, mono?, the last input each side
   | NPan !Prepared !Bool (Node s)
   | NAdd (Node s) (Node s)
   | NSampled ![Playing s] !Bool                       -- the regions playing, mono?
+  | NInput !(VU.Vector Double) !(VU.Vector Double) !(MV.MVector s Int)  -- a bus's summed notes, and how far in
 
 -- | One recording playing: its channels, how far to move per sample per Hz
 -- reaching it, its gain and loop, and the playback position in frames.
@@ -850,9 +964,11 @@ monoNode node = case node of
   NRaise _ c -> monoNode c
   NBend _ _ c -> monoNode c
   NFilter _ _ _ mono _ _ -> mono
+  NDrive _ _ mono _ _ -> mono
   NPan _ _ _ -> False
   NAdd a b -> monoNode a && monoNode b
   NSampled _ mono -> mono
+  NInput _ _ _ -> False
   _ -> True
 
 constantOf :: Prepared -> Maybe Double
@@ -952,8 +1068,8 @@ stepString fr st f = do
 -- velocity, @f0@ the frequency reaching this part at note-on, @phase@ the
 -- starting phase (spread by unison copies), @seeds@ counts the strings.
 compileVoice :: Double -> Double -> Double -> Word32 -> Int -> MV.MVector s Word32 -> STRef s Word32
-             -> Double -> Double -> Voice -> ST s (Node s)
-compileVoice fr gate vel seed takeNumber rng seeds = build
+             -> ST s (Node s) -> Double -> Double -> Voice -> ST s (Node s)
+compileVoice fr gate vel seed takeNumber rng seeds onBus = build
   where
     prep = prepare gate vel
     build !phase !f0 voice = case voice of
@@ -974,6 +1090,12 @@ compileVoice fr gate vel seed takeNumber rng seeds = build
         _ -> filterNode 0 m (max 0.05 (sqrt 2 * (1 - r))) phase f0 v
       Highpass m v -> filterNode 1 m (sqrt 2) phase f0 v
       Bandpass m w v -> filterNode 2 m ((2 ** w - 1) / sqrt (2 ** w)) phase f0 v
+      Drive m v -> let p = prep m in case constantOf p of
+        Just d | d <= 1e-9 -> build phase f0 v
+        _ -> do
+          child <- build phase f0 v
+          state <- MV.replicate 2 0
+          pure (NDrive p (usesKey m) (monoNode child) state child)
       Unison n c w v
         | n <= 1 -> build phase f0 v
         | otherwise -> foldr1 NAdd <$> mapM copy [0 .. n - 1]
@@ -985,6 +1107,7 @@ compileVoice fr gate vel seed takeNumber rng seeds = build
                 scale = 1 / sqrt (fromIntegral n)
             NRaise r . NScale (scale * vl) (scale * vr) <$> build (wrap (phase + fromIntegral j * 0.618034 + 0.1)) (f0 * r) v
       Pan m v -> NPan (prep m) (usesKey m) <$> build phase f0 v
+      Bus _ -> onBus
       a :& b -> NAdd <$> build phase f0 a <*> build phase f0 b
       Classic p -> build phase f0 (expandClassic p)
       Sampled set -> do
@@ -992,7 +1115,12 @@ compileVoice fr gate vel seed takeNumber rng seeds = build
         playing <- forM regions $ \r -> do
           position <- MV.replicate 1 0
           let recording = regionRecording r
-          pure (Playing (take 2 (recordingAudio recording)) (recordingRate recording / (fr * recordedPitch r))
+              -- Per sample per Hz: a region that follows the key is at its own
+              -- speed at its recorded pitch; a fixed one, at the note's pitch.
+              step = case regionFixed r of
+                Nothing -> recordingRate recording / (fr * recordedPitch r)
+                Just ratio -> ratio * recordingRate recording / (fr * f0)
+          pure (Playing (take 2 (recordingAudio recording)) step
                   (regionGain r) (regionLoop r) (regionSustainLoop r) position)
         pure (NSampled playing (all ((== 1) . length . playChannels) playing))
     filterNode kind m k phase f0 v = do
@@ -1046,6 +1174,13 @@ stepVoice fr gate = go
         if mono then pure (ya, ya) else do
           yb <- filterStep kind g k state 2 b
           pure (ya, yb)
+      NDrive p keyed mono state c -> do
+        (a, b) <- go c t f
+        let d = modNow p keyed t f
+        ya <- driveStep d state 0 a
+        if mono then pure (ya, ya) else do
+          yb <- driveStep d state 1 b
+          pure (ya, yb)
       NPan p keyed c -> do
         (a, b) <- go c t f
         let (gl, gr) = panGains (max (-1) (min 1 (modNow p keyed t f)))
@@ -1055,6 +1190,10 @@ stepVoice fr gate = go
         (c, d) <- go y t f
         pure (a + c, b + d)
       NSampled playing _ -> foldPlaying playing t f 0 0
+      NInput l r position -> do
+        i <- MV.unsafeRead position 0
+        MV.unsafeWrite position 0 (i + 1)
+        pure (if i < VU.length l then (VU.unsafeIndex l i, VU.unsafeIndex r i) else (0, 0))
     foldPlaying [] _ _ !l !r = pure (l, r)
     foldPlaying (p : ps) t f !l !r = do
       (a, b) <- playStepAt gate p t f
@@ -1098,6 +1237,26 @@ playStepAt gate p t f = do
         MV.unsafeWrite (playPosition p) 0 next
         pure (g * l, g * r)
 
+-- | One sample of the saturation @tanh (d x) / tanh d@. A waveshaper makes
+-- harmonics without limit, and those above half the sample rate would fold
+-- back as tones that belong to no note. So this is the curve's mean over the
+-- step from the last input to this one, by its antiderivative
+-- @log (cosh (d x)) / (d tanh d)@, which removes most of that folding for
+-- half a sample of delay.
+driveStep :: Double -> MV.MVector s Double -> Int -> Double -> ST s Double
+driveStep d state at x
+  | d <= 1e-9 = MV.unsafeWrite state at x >> pure x
+  | otherwise = do
+      x0 <- MV.unsafeRead state at
+      MV.unsafeWrite state at x
+      let scale = tanh d
+          dx = x - x0
+          logCosh u' = let u = abs u' in
+            if u < 0.01 then let u2 = u * u in u2 / 2 - u2 * u2 / 12 + u2 * u2 * u2 / 45
+            else u + log1p (exp (-2 * u)) - log 2
+      pure $ if abs dx < 1e-6 then tanh (d * 0.5 * (x + x0)) / scale
+             else (logCosh (d * x) - logCosh (d * x0)) / (d * scale * dx)
+
 filterStep :: Int -> Double -> Double -> MV.MVector s Double -> Int -> Double -> ST s Double
 filterStep kind g k state at x = do
   ic1 <- MV.unsafeRead state at
@@ -1112,27 +1271,87 @@ filterStep kind g k state at x = do
 {-# INLINE filterStep #-}
 
 renderVoice :: Double -> Word32 -> Int -> Note -> Voice -> Buffer s -> Buffer s -> Buffer s -> ST s ()
-renderVoice fr seed takeNumber v voice left right sends = do
+renderVoice fr seed takeNumber v voice left right sends = renderVoiceTo fr seed takeNumber v voice left right (Just sends)
+
+-- | A note into the mix (with its gain, pan and send), or, with no send
+-- buffer, into a bus: its voice and loudness only, since the instrument's
+-- gain, pan and send belong to the bus.
+renderVoiceTo :: Double -> Word32 -> Int -> Note -> Voice -> Buffer s -> Buffer s -> Maybe (Buffer s) -> ST s ()
+renderVoiceTo fr seed takeNumber v voice left right sends = do
   rng <- MV.replicate 1 (noteSeed seed)
   seeds <- newSTRef 0
   let curved = pitchMod v /= Flat 0
       freqAt u = if curved then hz v * 2 ** contourAt (pitchMod v) u else hz v
-  node <- compileVoice fr (duration v) (velocity v) seed takeNumber rng seeds 0 (noteOnFrequency v) voice
-  let (i0, i1) = sampleRange fr (MV.length left) (start v) (start v + duration v + voiceTail voice)
-      fade = declick (ringing voice == 0) (duration v)
-      (gl, gr) = panGains (pan v)
+      rings = noteRinging takeNumber v {sound = voice}
+      silent = NScale 0 0 (NNoise rng)
+  node <- compileVoice fr (duration v) (velocity v) seed takeNumber rng seeds (pure silent) 0 (noteOnFrequency v) voice
+  let (i0, i1) = sampleRange fr (MV.length left) (start v) (start v + duration v + max declickTime rings)
+      fade = declick (rings == 0) (duration v)
+      (gl, gr) = maybe (1, 1) (const (panGains (pan v))) sends
+      level = maybe 1 (const (gain v)) sends
       go !i
         | i >= i1 = pure ()
         | otherwise = do
             let t = fromIntegral i / fr - start v
                 u = max 0 (min 1 (t / duration v))
             (a, b) <- stepVoice fr (duration v) node t (freqAt u)
-            let e = fade t * if loudness v == Flat 1 then gain v else gain v * contourAt (loudness v) u
+            let e = fade t * if loudness v == Flat 1 then level else level * contourAt (loudness v) u
                 yl = e * gl * a
                 yr = e * gr * b
             addTo left i yl
             addTo right i yr
-            addTo sends i (send v * (yl + yr) / 2)
+            case sends of
+              Just bus -> addTo bus i (send v * (yl + yr) / 2)
+              Nothing -> pure ()
+            go (i + 1)
+  go i0
+
+-- | The notes that share a bus, in the order their first notes come: those of
+-- one sound with a 'Bus' at one gain, pan and send, which is an instrument.
+busGroups :: [(Word32, Int, Note)] -> [[(Word32, Int, Note)]]
+busGroups numbered = map (reverse . snd) (reverse (foldl place [] [x | x@(_, _, v) <- numbered, hasBus (sound v)]))
+  where
+    place groups x@(_, _, v) = case break (\(first, _) -> same first v) groups of
+      (before, (first, xs) : after) -> before ++ (first, x : xs) : after
+      (_, []) -> (v, [x]) : groups
+    same a b = gain a == gain b && pan a == pan b && send a == send b && sound a == sound b
+
+-- | One bus. The voice inside each 'Bus' is rendered for every note into one
+-- stereo sum, the shapers outside run once over those sums to the end of the
+-- mix (so a filter rings out), and the instrument's gain, pan and send apply
+-- to the result as they would to a note.
+renderBus :: Double -> [(Word32, Int, Note)] -> Buffer s -> Buffer s -> Buffer s -> ST s ()
+renderBus _ [] _ _ _ = pure ()
+renderBus fr notesOfBus@((_, _, first) : _) left right sends = do
+  let len = MV.length left
+      voice = sound first
+      (i0, i1) = sampleRange fr len (minimum [start v | (_, _, v) <- notesOfBus])
+                   (maximum [start v + duration v + noteTail k v | (_, k, v) <- notesOfBus])
+      shift = fromIntegral i0 / fr
+  inputs <- forM (busInputs voice) $ \inner -> do
+    l <- MV.replicate (max 0 (i1 - i0)) 0
+    r <- MV.replicate (max 0 (i1 - i0)) 0
+    forM_ notesOfBus $ \(seed, k, v) -> renderVoiceTo fr seed k v {start = max 0 (start v - shift)} inner l r Nothing
+    (,) <$> VU.unsafeFreeze l <*> VU.unsafeFreeze r
+  pending <- newSTRef inputs
+  rng <- MV.replicate 1 0
+  seeds <- newSTRef 0
+  let nextInput = do
+        rest <- readSTRef pending
+        case rest of
+          (l, r) : more -> writeSTRef pending more >> (NInput l r <$> MV.replicate 1 0)
+          [] -> pure (NScale 0 0 (NNoise rng))
+  node <- compileVoice fr (1 / 0) 0 0 0 rng seeds nextInput 0 261.63 voice
+  let (gl, gr) = panGains (pan first)
+      go !i
+        | i >= len = pure ()
+        | otherwise = do
+            (a, b) <- stepVoice fr (1 / 0) node (fromIntegral (i - i0) / fr) 261.63
+            let yl = gain first * gl * a
+                yr = gain first * gr * b
+            addTo left i yl
+            addTo right i yr
+            addTo sends i (send first * (yl + yr) / 2)
             go (i + 1)
   go i0
 

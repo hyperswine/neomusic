@@ -1,0 +1,81 @@
+-- A twelve-bar chorale for the rest of the orchestra: woodwinds alone, the
+-- brass answering over a timpani roll, then everyone, with the percussion.
+-- Written 2026-11-06 to hear the VSCO 2 CE instruments mapped that day (see
+-- docs/2026-11-06-NEOMUSIC-DRUMS-DRIVE-ORCHESTRA.md); orchestral-recorded
+-- has the strings, harp, flute, horn and timpani that came first.
+-- Needs NEOMUSIC_SAMPLES holding VSCO 2 CE (CC0) and the Jack Lyons room
+-- (OpenAIR, Audiolab, University of York, CC BY 4.0):
+-- scripts/fetch-samples.py, or vsco/make-sfz.py and rooms/make-room.py.
+
+tempo 84
+tuning 12 at C4
+meter 4
+
+-- Sustained instruments follow the note: a release lets each ring a little.
+sound fluteS    = gain ((0.45 + 0.55 * velocity) * adsr 0.03 0 1 0.35) sampled "vsco/flute.sfz"
+sound piccoloS  = gain ((0.45 + 0.55 * velocity) * adsr 0.03 0 1 0.3) sampled "vsco/piccolo.sfz"
+sound oboeS     = gain ((0.45 + 0.55 * velocity) * adsr 0.03 0 1 0.3) sampled "vsco/oboe.sfz"
+sound clarinetS = gain ((0.45 + 0.55 * velocity) * adsr 0.03 0 1 0.3) sampled "vsco/clarinet.sfz"
+sound bassoonS  = gain ((0.45 + 0.55 * velocity) * adsr 0.03 0 1 0.3) sampled "vsco/bassoon.sfz"
+sound trumpetS  = gain ((0.45 + 0.55 * velocity) * adsr 0.02 0 1 0.3) sampled "vsco/trumpet.sfz"
+sound hornS     = gain ((0.45 + 0.55 * velocity) * adsr 0.03 0 1 0.4) sampled "vsco/horn.sfz"
+sound tromboneS = gain ((0.45 + 0.55 * velocity) * adsr 0.03 0 1 0.35) sampled "vsco/trombone.sfz"
+sound tubaS     = gain ((0.45 + 0.55 * velocity) * adsr 0.03 0 1 0.4) sampled "vsco/tuba.sfz"
+sound stringsS  = gain ((0.45 + 0.55 * velocity) * adsr 0.06 0 1 0.7) sampled "vsco/strings.sfz"
+sound rollS     = gain ((0.45 + 0.55 * velocity) * adsr 0.05 0 1 0.6) sampled "vsco/timpani-roll.sfz"
+sound timpS     = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1.5) sampled "vsco/timpani.sfz"
+sound glockS    = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 2) sampled "vsco/glockenspiel.sfz"
+sound bellsS    = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 4) sampled "vsco/tubular-bells.sfz"
+-- Unpitched percussion plays as recorded, to the end of each recording.
+sound cymbalsS  = sampled "vsco/cymbals.sfz"
+sound bassDrumS = sampled "vsco/bass-drum.sfz"
+sound snareRollS = gain (adsr 0.01 0 1 0.15) sampled "vsco/concert-snare-roll.sfz"
+sound triangleS = sampled "vsco/triangle.sfz"
+
+reverb space "rooms/jack-lyons/jack-lyons-lp2-stereo.wav" wet 0.4 predelay 0
+master rate 44100 bits 24 peak 0.8 tail 4
+
+instrument flute    = fluteS gain 1.6 pan -0.2 send 0.6
+instrument piccolo  = piccoloS gain 1.5 pan -0.25 send 0.6
+instrument oboe     = oboeS gain 2.0 pan -0.05 send 0.6
+instrument clarinet = clarinetS gain 1.8 pan 0.1 send 0.6
+instrument bassoon  = bassoonS gain 1.1 pan 0.2 send 0.6
+instrument trumpet  = trumpetS gain 0.8 pan 0.25 send 0.6
+instrument horn     = hornS gain 0.8 pan -0.3 send 0.65
+instrument trombone = tromboneS gain 3.5 pan 0.35 send 0.6
+instrument tuba     = tubaS gain 1.6 pan 0.3 send 0.6
+instrument strings  = stringsS gain 0.9 send 0.6
+instrument roll     = rollS gain 1.5 send 0.6
+instrument timp     = timpS gain 2.0 send 0.6
+instrument glock    = glockS gain 6 pan -0.1 send 0.6
+instrument bells    = bellsS gain 1.2 pan 0.15 send 0.65
+instrument cymbals  = cymbalsS gain 0.8 send 0.6 pitch 49
+instrument bassdrum = bassDrumS gain 1.2 send 0.5 pitch 36
+instrument snare    = snareRollS gain 3 send 0.5 pitch 38
+instrument triangle = triangleS gain 4 pan 0.2 send 0.6 pitch 81
+
+-- Bars 1-4: the woodwinds (I, I, IV, V).
+flute:    vel 0.6 [16 14 12 14  16 19 19:2  21 19 17 16  dim 0.6 0.4 [14:3]] _:1 _:16
+          vel 0.85 [24:2 23 21  19:2 21 23  24:4 24:4]
+oboe:     vel 0.55 [12:4 12:4 12:4 11:3] _:1 _:16 vel 0.8 [16:2 16 16  12:2 14:2  16:4 16:4]
+clarinet: vel 0.55 [4:4 7:4 5:4 2:3] _:1 _:16 vel 0.8 [7:4 5:2 7:2 7:4 7:4]
+bassoon:  vel 0.6 [-12:4 -8:4 -7:4 -5:3] _:1 _:16 vel 0.8 [-12:4 -7:2 -5:2 -12:4 -12:4]
+
+-- Bars 5-8: the brass answer (I, IV, I, V), a roll growing under the last bar.
+trumpet:  _:16 vel 0.65 [16 17 19:2  21 19 17:2  16 14 12 14  cresc 0.6 0.9 [14:4]]
+          vel 0.9 [24:2 23 21  19:2 21 23  24:4 24:4]
+horn:     _:16 vel 0.6 [7:4 9:4 7:4 cresc 0.6 0.85 [7:4]] vel 0.85 [(4 7):4 (5 9):2 (7 11):2 (4 7):4 (4 7):4]
+trombone: _:16 vel 0.6 [4:4 5:4 4:4 cresc 0.6 0.85 [2:4]] vel 0.85 [0:4 0:2 -1:2 0:4 0:4]
+tuba:     _:16 vel 0.6 [-24:4 -19:4 -17:4 cresc 0.6 0.85 [-17:4]] vel 0.85 [-24:4 -19:2 -17:2 -24:4 -24:4]
+roll:     _:28 cresc 0.3 0.9 [-17:4] _:8 cresc 0.5 0.95 [-12:8]
+snare:    _:28 vel 0.6 [0:4] _:16
+
+-- Bars 9-12: everyone (I, IV-V, I, I).
+strings:  _:32 vel 0.8 [(-12 0 4 7 12):4 (-7 0 5 9):2 (-5 2 7 11):2 (-12 0 4 7 12):8]
+piccolo:  _:32 vel 0.7 [36:2 35 33  31:2 33 35  36:4] _:4
+glock:    _:32 vel 0.7 [36:2 35 33  31:2 33 35  36:4] _:4
+timp:     _:32 vel 0.9 [-12:2 -12 -12  -19:2 -17:2] _:8
+bells:    _:40 vel 0.8 [12:4 12:4]
+cymbals:  _:32 vel 0.9 [0:8] 0:8
+bassdrum: _:32 vel 0.85 [0:8] vel 0.95 [0:8]
+triangle: _:44 vel 0.6 [0:4]

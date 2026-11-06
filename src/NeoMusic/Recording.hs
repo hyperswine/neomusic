@@ -50,7 +50,9 @@ data Region = Region
   , regionGain :: Double                  -- ^ linear, from @volume@ in dB
   , regionTake :: (Int, Int)              -- ^ @(seq_length, seq_position)@
   , regionLoop :: Maybe (Int, Int)        -- ^ loop start and end frames (inclusive)
-  , regionSustainLoop :: Bool }           -- ^ loop only until note-off
+  , regionSustainLoop :: Bool             -- ^ loop only until note-off
+  , regionFixed :: Maybe Double           -- ^ @pitch_keytrack=0@: plays at this ratio of its recorded speed on every key
+  , regionOneShot :: Bool }               -- ^ @loop_mode=one_shot@: plays to its end, whenever the note ends
   deriving (Eq, Show)
 
 data SampleSet = SampleSet { setPath :: FilePath, setRegions :: [Region] } deriving (Eq, Show)
@@ -207,7 +209,7 @@ parseSfz text = do
   pure [M.unions [r, g, c] | (r, c, g) <- regions]
   where
     supported = ["sample", "default_path", "pitch_keycenter", "key", "lokey", "hikey", "lovel", "hivel"
-                , "tune", "volume", "loop_mode", "loop_start", "loop_end", "seq_length", "seq_position"]
+                , "pitch_keytrack", "tune", "volume", "loop_mode", "loop_start", "loop_end", "seq_length", "seq_position"]
     -- Headers, and opcodes whose values run to the next opcode or header.
     tokens (_, raw) = Right (go (dropWhile isSpace (stripComment raw)))
     stripComment s = case breakOn "//" s of (a, _) -> a
@@ -265,6 +267,8 @@ regionShape ops = do
   vlo <- maybe 1 round <$> number "lovel"
   vhi <- maybe 127 round <$> number "hivel"
   tune <- fromMaybe 0 <$> number "tune"
+  track <- fromMaybe 100 <$> number "pitch_keytrack"
+  unless (track == 0 || track == 100) (Left "pitch_keytrack must be 0 or 100")
   volume <- fromMaybe 0 <$> number "volume"
   len <- maybe 1 round <$> number "seq_length"
   pos <- maybe 1 round <$> number "seq_position"
@@ -288,6 +292,7 @@ regionShape ops = do
         valid (s, e) = s >= 0 && e > s && e < recordingFrames recording
     in Region recording (fromIntegral centre - tune / 100) (lo, hi) (vlo, vhi) (10 ** (volume / 20)) (len, pos)
          (if looping then mfilter valid points else Nothing) (mode == Just "loop_sustain")
+         (if track == 0 then Just (2 ** (tune / 1200)) else Nothing) (mode == Just "one_shot")
 
 readNumber :: String -> String -> Either String Double
 readNumber k s = case reads s :: [(Double, String)] of
